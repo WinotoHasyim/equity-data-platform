@@ -1,7 +1,8 @@
 # Alpaca Stock Data Pipeline
 
 A data-engineering pipeline that collects historical and real-time
-US stock market data from Alpaca's free IEX feed.
+US stock market data from Alpaca's free IEX feed. Raw events land in
+Google Cloud Storage, and BigQuery with dbt performs the transformations.
 
 ## Stock universe
 
@@ -12,7 +13,8 @@ US stock market data from Alpaca's free IEX feed.
 - META
 
 These highly traded technology companies generate enough market events
-for testing batch and streaming pipelines.
+for testing batch and streaming pipelines. Edit the `symbols` list in
+`config.toml` to change or expand the universe without changing Python code.
 
 ## Data collected
 
@@ -57,8 +59,8 @@ For the five stocks:
 1. Download five years of daily bars.
 2. Download one month of one-minute bars.
 3. Download one trading day of historical quotes and trades.
-4. Validate, normalize, and deduplicate every dataset.
-5. Store each event type as partitioned Parquet.
-6. Reconcile historical and streaming data into canonical tables.
-7. Query the datasets with DuckDB.
+4. Store the unmodified source records in Google Cloud Storage.
+5. Load or expose the raw datasets in BigQuery staging tables.
+6. Use dbt to validate, normalize, deduplicate, and reconcile the data.
+7. Build canonical and analytical tables in BigQuery.
 8. Increase the quote and trade date range after measuring volume.
