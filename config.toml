@@ -1,0 +1,4 @@
+[pipeline]
+symbols = ["AAPL", "MSFT", "NVDA", "AMZN", "META"]
+feed = "iex"
+data_dir = "data"
