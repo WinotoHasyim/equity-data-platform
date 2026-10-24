@@ -1,6 +1,6 @@
 from alpaca.data.historical import StockHistoricalDataClient
 
-from alpaca_pipeline.config import Settings, get_settings
+from equity_data_platform.config import Settings, get_settings
 
 
 def create_historical_client(

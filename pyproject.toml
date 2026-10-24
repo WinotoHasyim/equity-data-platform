@@ -1,7 +1,7 @@
 [project]
-name = "alpaca-pipeline"
+name = "equity-data-platform"
 version = "0.1.0"
-description = "Add your description here"
+description = "An Alpaca-to-BigQuery equity market data pipeline"
 readme = "README.md"
 authors = [
     { name = "WinotoHasyim", email = "hasyimwinoto@gmail.com" }
@@ -16,7 +16,7 @@ dependencies = [
 ]
 
 [project.scripts]
-alpaca-pipeline = "alpaca_pipeline:main"
+equity-data-platform = "equity_data_platform:main"
 
 [build-system]
 requires = ["uv_build>=0.12.3,<0.13.0"]

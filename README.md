@@ -1,8 +1,8 @@
-# Alpaca Stock Data Pipeline
+# Equity Data Platform
 
-A data-engineering pipeline that collects historical and real-time
-US stock market data from Alpaca's free IEX feed. Raw events land in
-Google Cloud Storage, and BigQuery with dbt performs the transformations.
+An Alpaca-to-BigQuery data platform that collects historical and real-time
+US equity market data from Alpaca's free IEX feed. Raw events land in Google
+Cloud Storage, and BigQuery with dbt performs the transformations.
 
 ## Stock universe
 
