@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import logging
 import re
+import sys
 import uuid
 from collections.abc import Sequence
 from datetime import date
@@ -22,6 +23,34 @@ from equity_data_platform.daily_bars import (
 
 LOGGER = logging.getLogger(__name__)
 RUN_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+
+
+class _BelowErrorFilter(logging.Filter):
+    """Keep informational logs on stdout while reserving stderr for failures."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return record.levelno < logging.ERROR
+
+
+def configure_logging() -> None:
+    """Configure stream-aware logging for terminals and orchestrators."""
+
+    formatter = logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
+
+    stdout_handler = logging.StreamHandler(sys.stdout)
+    stdout_handler.setLevel(logging.INFO)
+    stdout_handler.addFilter(_BelowErrorFilter())
+    stdout_handler.setFormatter(formatter)
+
+    stderr_handler = logging.StreamHandler(sys.stderr)
+    stderr_handler.setLevel(logging.ERROR)
+    stderr_handler.setFormatter(formatter)
+
+    root_logger = logging.getLogger()
+    root_logger.handlers.clear()
+    root_logger.setLevel(logging.INFO)
+    root_logger.addHandler(stdout_handler)
+    root_logger.addHandler(stderr_handler)
 
 
 def parse_date(value: str) -> date:
@@ -122,10 +151,7 @@ def run(argv: Sequence[str] | None = None) -> int:
 
 
 def main() -> None:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
+    configure_logging()
     try:
         raise SystemExit(run())
     except SystemExit:
