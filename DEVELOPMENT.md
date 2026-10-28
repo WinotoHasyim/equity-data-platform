@@ -172,12 +172,14 @@ configuration was intentionally modified.
 
 ```bash
 docker compose --profile build build pipeline-image
-docker compose --profile build images
+docker image ls equity-data-platform:dev
 ```
 
 Rebuild after changing Python source, `pyproject.toml`, `uv.lock`,
 `config.toml`, or the Dockerfile. Building the image does not start the batch
-pipeline.
+pipeline. `docker compose images` lists images used by containers that Compose
+has already created, so it can be empty immediately after a build-only command.
+Use `docker image ls` to verify a locally built image.
 
 ### 4. Start Kestra
 
