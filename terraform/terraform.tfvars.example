@@ -1,0 +1,9 @@
+project_id = "replace-with-your-gcp-project-id"
+
+# Optional overrides:
+# environment          = "dev"
+# location             = "asia-southeast2"
+# raw_bucket_name      = "globally-unique-raw-bucket-name"
+# raw_dataset_id       = "equity_raw"
+# analytics_dataset_id = "equity_analytics"
+# force_destroy        = false
