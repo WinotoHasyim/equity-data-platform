@@ -1,13 +1,35 @@
+import re
 import tomllib
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field, SecretStr
+from pydantic import BaseModel, Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 PROJECT_CONFIG_PATH = PROJECT_ROOT / "config.toml"
+SYMBOL_PATTERN = re.compile(r"^[A-Z][A-Z0-9.-]{0,14}$")
+
+
+def normalize_symbols(symbols: tuple[str, ...] | list[str]) -> tuple[str, ...]:
+    """Normalize a symbol collection while preserving its original order."""
+
+    normalized: list[str] = []
+    seen: set[str] = set()
+
+    for raw_symbol in symbols:
+        symbol = raw_symbol.strip().upper()
+        if not SYMBOL_PATTERN.fullmatch(symbol):
+            raise ValueError(f"Invalid stock symbol: {raw_symbol!r}")
+        if symbol not in seen:
+            normalized.append(symbol)
+            seen.add(symbol)
+
+    if not normalized:
+        raise ValueError("At least one stock symbol is required")
+
+    return tuple(normalized)
 
 
 class PipelineConfig(BaseModel):
@@ -17,13 +39,21 @@ class PipelineConfig(BaseModel):
     feed: Literal["iex"]
     data_dir: Path
 
+    @field_validator("symbols", mode="before")
+    @classmethod
+    def validate_symbols(cls, value: list[str] | tuple[str, ...]) -> tuple[str, ...]:
+        return normalize_symbols(value)
+
 
 def load_pipeline_config() -> PipelineConfig:
     """Load non-secret pipeline configuration from the project TOML file."""
 
     with PROJECT_CONFIG_PATH.open("rb") as config_file:
         config = tomllib.load(config_file)
-    return PipelineConfig.model_validate(config["pipeline"])
+    pipeline_config = PipelineConfig.model_validate(config["pipeline"])
+    if not pipeline_config.data_dir.is_absolute():
+        pipeline_config.data_dir = PROJECT_ROOT / pipeline_config.data_dir
+    return pipeline_config
 
 
 PIPELINE_CONFIG = load_pipeline_config()

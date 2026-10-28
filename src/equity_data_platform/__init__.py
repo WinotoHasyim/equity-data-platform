@@ -1,2 +1,1 @@
-def main() -> None:
-    print("Equity Data Platform")
+"""Equity Data Platform package."""
