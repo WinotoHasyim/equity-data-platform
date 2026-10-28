@@ -1,0 +1,13 @@
+.git
+.gitignore
+.venv
+.env
+.env.*
+data
+dist
+docs
+terraform
+tests
+**/__pycache__
+**/*.ipynb
+**/*.pyc

@@ -1,0 +1,22 @@
+select
+    symbol,
+    timestamp,
+    open,
+    high,
+    low,
+    close,
+    volume,
+    trade_count,
+    vwap,
+    source,
+    dataset,
+    feed,
+    timeframe,
+    adjustment,
+    run_id,
+    batch_key,
+    bar_key,
+    payload_fingerprint,
+    ingested_at,
+    schema_version
+from {{ source('equity_raw', 'daily_bars') }}

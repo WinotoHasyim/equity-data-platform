@@ -1,0 +1,119 @@
+id: daily_bars_extract
+namespace: equity.dev
+
+description: |
+  Extract validated Alpaca daily bars and publish an immutable Parquet batch
+  plus its completion manifest to the configured raw GCS bucket.
+
+inputs:
+  - id: start_date
+    type: DATE
+    description: Inclusive extraction start date.
+
+  - id: end_date
+    type: DATE
+    description: Inclusive extraction end date.
+
+  - id: symbols
+    type: ARRAY
+    itemType: STRING
+    description: Company stock symbols to extract.
+
+tasks:
+  - id: extract_daily_bars
+    type: io.kestra.plugin.scripts.shell.Commands
+    containerImage: "{{ kv('PIPELINE_IMAGE') }}"
+    taskRunner:
+      type: io.kestra.plugin.scripts.runner.docker.Docker
+      pullPolicy: NEVER
+      user: root
+    env:
+      APCA_API_KEY_ID: "{{ secret('APCA_API_KEY_ID') }}"
+      APCA_API_SECRET_KEY: "{{ secret('APCA_API_SECRET_KEY') }}"
+      BATCH_END_DATE: "{{ inputs.end_date }}"
+      BATCH_RUN_ID: "{{ execution.id }}"
+      BATCH_START_DATE: "{{ inputs.start_date }}"
+      BATCH_SYMBOLS: "{{ inputs.symbols }}"
+    commands:
+      - |
+        python - <<'PY'
+        import json
+        import os
+        import subprocess
+        from pathlib import Path
+
+        run_id = os.environ["BATCH_RUN_ID"]
+        batch_path = Path("daily_bars") / f"run_id={run_id}"
+        command = [
+            "/app/.venv/bin/equity-data-platform",
+            "--start-date",
+            os.environ["BATCH_START_DATE"],
+            "--end-date",
+            os.environ["BATCH_END_DATE"],
+            "--run-id",
+            run_id,
+            "--output-dir",
+            ".",
+        ]
+        for symbol in json.loads(os.environ["BATCH_SYMBOLS"]):
+            command.extend(["--symbol", symbol])
+
+        subprocess.run(command, check=True)
+
+        part_names = sorted(path.name for path in batch_path.glob("part-*.parquet"))
+        output = {
+            "outputs": {
+                "batch_path": str(batch_path),
+                "has_parquet": bool(part_names),
+                "manifest_key": str(batch_path / "manifest.json"),
+                "part_names": part_names,
+            }
+        }
+        print(f"::{json.dumps(output, separators=(',', ':'))}::")
+        PY
+    outputFiles:
+      - "daily_bars/run_id={{ execution.id }}/*"
+
+  - id: upload_parts_if_present
+    type: io.kestra.plugin.core.flow.If
+    condition: "{{ outputs.extract_daily_bars.vars.has_parquet }}"
+    then:
+      - id: upload_parquet_parts
+        type: io.kestra.plugin.core.flow.ForEach
+        values: "{{ outputs.extract_daily_bars.vars.part_names }}"
+        concurrencyLimit: 4
+        tasks:
+          - id: upload_part
+            type: io.kestra.plugin.gcp.gcs.Upload
+            projectId: "{{ kv('GCP_PROJECT_ID') }}"
+            from: "{{ outputs.extract_daily_bars.outputFiles[outputs.extract_daily_bars.vars.batch_path ~ '/' ~ taskrun.value] }}"
+            to: "gs://{{ kv('GCS_RAW_BUCKET') }}/daily_bars/batch_start={{ inputs.start_date }}/batch_end={{ inputs.end_date }}/run_id={{ execution.id }}/{{ taskrun.value }}"
+
+  - id: upload_manifest
+    type: io.kestra.plugin.gcp.gcs.Upload
+    projectId: "{{ kv('GCP_PROJECT_ID') }}"
+    from: "{{ outputs.extract_daily_bars.outputFiles[outputs.extract_daily_bars.vars.manifest_key] }}"
+    to: "gs://{{ kv('GCS_RAW_BUCKET') }}/daily_bars/batch_start={{ inputs.start_date }}/batch_end={{ inputs.end_date }}/run_id={{ execution.id }}/manifest.json"
+
+  - id: log_published_batch
+    type: io.kestra.plugin.core.log.Log
+    message: |
+      Published daily-bars batch for {{ inputs.start_date }} through {{ inputs.end_date }}.
+      Manifest: {{ outputs.upload_manifest.uri }}
+
+outputs:
+  - id: extract_run_id
+    type: STRING
+    value: "{{ execution.id }}"
+
+  - id: has_parquet
+    type: BOOLEAN
+    value: "{{ outputs.extract_daily_bars.vars.has_parquet }}"
+
+  - id: manifest_uri
+    type: STRING
+    value: "{{ outputs.upload_manifest.uri }}"
+
+  - id: parquet_uri
+    type: STRING
+    value: "gs://{{ kv('GCS_RAW_BUCKET') }}/daily_bars/batch_start={{ inputs.start_date }}/batch_end={{ inputs.end_date }}/run_id={{ execution.id }}/part-*.parquet"

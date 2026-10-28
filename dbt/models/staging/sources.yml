@@ -1,0 +1,9 @@
+version: 2
+
+sources:
+  - name: equity_raw
+    database: "{{ env_var('DBT_GCP_PROJECT_ID') }}"
+    schema: "{{ env_var('DBT_RAW_DATASET') }}"
+    tables:
+      - name: daily_bars
+        description: Append-only Alpaca daily-bar observations loaded from raw GCS batches.

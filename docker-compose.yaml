@@ -1,0 +1,89 @@
+name: equity-data-platform
+
+services:
+  pipeline-image:
+    profiles: ["build"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ${PIPELINE_IMAGE:-equity-data-platform:dev}
+    entrypoint: ["/bin/true"]
+    restart: "no"
+
+  kestra-postgres:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: kestra
+      POSTGRES_USER: kestra
+      POSTGRES_PASSWORD: ${KESTRA_POSTGRES_PASSWORD:-kestra-local-only}
+    volumes:
+      - kestra-postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -d kestra -U kestra"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  kestra:
+    image: kestra/kestra:${KESTRA_VERSION:-v1.3.45}
+    pull_policy: if_not_present
+    user: root
+    command: server standalone
+    restart: unless-stopped
+    env_file:
+      - path: .env.kestra
+        required: false
+    environment:
+      GOOGLE_APPLICATION_CREDENTIALS: /var/secrets/google/application_default_credentials.json
+      KESTRA_CONFIGURATION: |
+        micronaut:
+          io:
+            watch:
+              enabled: true
+              paths:
+                - /app/flows
+        datasources:
+          postgres:
+            url: jdbc:postgresql://kestra-postgres:5432/kestra
+            driver-class-name: org.postgresql.Driver
+            username: kestra
+            password: ${KESTRA_POSTGRES_PASSWORD:-kestra-local-only}
+        kestra:
+          plugins:
+            configurations:
+              - type: io.kestra.plugin.scripts.runner.docker.Docker
+                values:
+                  volume-enabled: true
+          server:
+            basic-auth:
+              username: "${KESTRA_ADMIN_EMAIL:-admin@localhost.dev}"
+              password: "${KESTRA_ADMIN_PASSWORD:-Admin1234!}"
+          repository:
+            type: postgres
+          queue:
+            type: postgres
+          storage:
+            type: local
+            local:
+              base-path: /app/storage
+          tasks:
+            tmp-dir:
+              path: /tmp/kestra-wd/tmp
+          url: http://localhost:8080/
+    volumes:
+      - kestra-data:/app/storage
+      - ./flows:/app/flows:ro
+      - ${HOME}/.config/gcloud/application_default_credentials.json:/var/secrets/google/application_default_credentials.json:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${KESTRA_TMP_DIR:-/tmp/equity-data-platform-kestra-wd}:/tmp/kestra-wd
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      kestra-postgres:
+        condition: service_healthy
+
+volumes:
+  kestra-data:
+  kestra-postgres-data:

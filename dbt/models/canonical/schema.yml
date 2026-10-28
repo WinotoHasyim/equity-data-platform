@@ -1,0 +1,20 @@
+version: 2
+
+models:
+  - name: daily_bars
+    description: Latest accepted observation for each logical symbol/feed daily bar.
+    columns:
+      - name: bar_key
+        description: Deterministic identity of one logical daily bar.
+        data_tests:
+          - not_null
+          - unique
+      - name: symbol
+        data_tests:
+          - not_null
+      - name: timestamp
+        data_tests:
+          - not_null
+      - name: payload_fingerprint
+        data_tests:
+          - not_null
