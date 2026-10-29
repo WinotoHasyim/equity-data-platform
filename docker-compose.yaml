@@ -12,7 +12,7 @@ services:
 
   kestra-postgres:
     image: postgres:17
-    restart: unless-stopped
+    restart: "no"
     environment:
       POSTGRES_DB: kestra
       POSTGRES_USER: kestra
@@ -31,7 +31,7 @@ services:
     pull_policy: if_not_present
     user: root
     command: server standalone
-    restart: unless-stopped
+    restart: "no"
     env_file:
       - path: .env.kestra
         required: false
