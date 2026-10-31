@@ -34,7 +34,7 @@ The platform is built in five layers:
 | --- | --- |
 | Ingestion | Alpaca WebSocket events are consumed continuously; historical APIs backfill gaps and bootstrap history |
 | Streaming | Kafka buffers and distributes trades, quotes, bars, statuses, corrections, and cancellations |
-| Storage | Micro-batched Parquet files preserve raw events in Google Cloud Storage |
+| Storage | BigQuery retains live observations; Parquet in GCS preserves historical batches and backfills |
 | Analytics | BigQuery and dbt build reconciled market history, baselines, and analytical marts |
 | Serving | A dashboard presents live conditions, alerts, historical comparisons, and data coverage |
 
@@ -47,13 +47,14 @@ downstream transformations. Terraform provisions the cloud infrastructure.
 flowchart LR
     A[Alpaca WebSocket] --> B[Kafka]
     B --> C[Stream consumers]
-    C --> D[(GCS raw Parquet)]
+    C --> R[(BigQuery raw streaming)]
 
     H[Alpaca Historical API] --> I[Backfill pipeline]
-    I --> D
+    I --> D[(GCS historical Parquet)]
 
-    D --> E[(BigQuery)]
+    D --> E[(BigQuery raw batch)]
     E --> F[dbt models]
+    R --> F
     F --> G[Market surveillance dashboard]
 
     K[Kestra] -. orchestrates .-> I
