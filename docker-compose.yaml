@@ -51,6 +51,8 @@ services:
             username: kestra
             password: ${KESTRA_POSTGRES_PASSWORD:-kestra-local-only}
         kestra:
+          tutorialFlows:
+            enabled: false
           plugins:
             configurations:
               - type: io.kestra.plugin.scripts.runner.docker.Docker

@@ -20,13 +20,10 @@ inputs:
   - id: symbols
     type: ARRAY
     itemType: STRING
-    defaults:
-      - AAPL
-      - MSFT
-      - NVDA
-      - AMZN
-      - META
-    description: Company stock symbols to backfill.
+    required: false
+    description: |
+      Optional company-stock-symbol override. When omitted, extraction uses
+      the symbols checked into config.toml in the pipeline image.
 
 tasks:
   - id: extract
@@ -38,7 +35,7 @@ tasks:
     inputs:
       start_date: "{{ inputs.start_date }}"
       end_date: "{{ inputs.end_date }}"
-      symbols: "{{ inputs.symbols }}"
+      symbols: "{{ inputs.symbols ?? [] }}"
 
   - id: load_and_transform_if_data
     type: io.kestra.plugin.core.flow.If
@@ -52,6 +49,7 @@ tasks:
         transmitFailed: true
         inputs:
           extract_run_id: "{{ outputs.extract.outputs.extract_run_id }}"
+          expected_rows: "{{ outputs.extract.outputs.row_count }}"
           parquet_uri: "{{ outputs.extract.outputs.parquet_uri }}"
 
       - id: transform
@@ -68,13 +66,23 @@ tasks:
     message: |
       Backfill completed for {{ inputs.start_date }} through {{ inputs.end_date }}.
       Extract execution: {{ outputs.extract.executionId }}
+      Extracted rows: {{ outputs.extract.outputs.row_count }}
+      Effective symbols: {{ outputs.extract.outputs.effective_symbols }}
       Manifest: {{ outputs.extract.outputs.manifest_uri }}
+
+errors:
+  - id: log_backfill_failure
+    type: io.kestra.plugin.core.log.Log
+    level: ERROR
+    message: |
+      Daily-bars backfill failed for {{ inputs.start_date }} through {{ inputs.end_date }}.
+      Inspect this execution and its child execution logs before retrying.
 
 outputs:
   - id: extract_run_id
     type: STRING
-    value: "{{ outputs.extract.outputs.extract_run_id }}"
+    value: "{{ (tasks.extract.state | default('FAILED')) == 'SUCCESS' ? outputs.extract.outputs.extract_run_id : '' }}"
 
   - id: manifest_uri
     type: STRING
-    value: "{{ outputs.extract.outputs.manifest_uri }}"
+    value: "{{ (tasks.extract.state | default('FAILED')) == 'SUCCESS' ? outputs.extract.outputs.manifest_uri : '' }}"

@@ -10,9 +10,21 @@ inputs:
   - id: parquet_uri
     type: STRING
 
+  - id: expected_rows
+    type: INT
+
 tasks:
   - id: load_raw_daily_bars
     type: io.kestra.plugin.gcp.bigquery.LoadFromGcs
+    timeout: PT30M
+    retry:
+      type: exponential
+      interval: PT5S
+      maxInterval: PT1M
+      maxAttempts: 3
+      # Three attempts can each consume the 30-minute task timeout.
+      maxDuration: PT1H35M
+      warningOnRetry: true
     projectId: "{{ kv('GCP_PROJECT_ID') }}"
     location: "{{ kv('GCP_LOCATION') }}"
     from:
@@ -27,18 +39,33 @@ tasks:
       - symbol
       - feed
 
+  - id: assert_loaded_row_count
+    type: io.kestra.plugin.core.execution.Assert
+    conditions:
+      - "{{ outputs.load_raw_daily_bars.rows == inputs.expected_rows }}"
+    errorMessage: |
+      BigQuery load row count does not match the extraction manifest.
+
   - id: log_loaded_batch
     type: io.kestra.plugin.core.log.Log
     message: |
       Loaded extract run {{ inputs.extract_run_id }} into
       {{ outputs.load_raw_daily_bars.destinationTable }}
-      Rows loaded: {{ outputs.load_raw_daily_bars.rows }}
+      Rows loaded: {{ outputs.load_raw_daily_bars.rows }} of {{ inputs.expected_rows }} expected.
+
+errors:
+  - id: log_load_failure
+    type: io.kestra.plugin.core.log.Log
+    level: ERROR
+    message: |
+      Raw BigQuery load failed in execution {{ execution.id }}.
+      Do not run the transform until the load and row-count assertion succeed.
 
 outputs:
   - id: destination_table
     type: STRING
-    value: "{{ outputs.load_raw_daily_bars.destinationTable }}"
+    value: "{{ (tasks.load_raw_daily_bars.state | default('FAILED')) == 'SUCCESS' ? outputs.load_raw_daily_bars.destinationTable : '' }}"
 
   - id: loaded_rows
     type: INT
-    value: "{{ outputs.load_raw_daily_bars.rows }}"
+    value: "{{ (tasks.load_raw_daily_bars.state | default('FAILED')) == 'SUCCESS' ? outputs.load_raw_daily_bars.rows : 0 }}"

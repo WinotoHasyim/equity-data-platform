@@ -10,6 +10,7 @@ inputs:
 tasks:
   - id: dbt_build_daily_bars
     type: io.kestra.plugin.dbt.cli.DbtCLI
+    timeout: PT30M
     containerImage: "{{ kv('PIPELINE_IMAGE') }}"
     projectDir: /app/dbt
     taskRunner:
@@ -39,3 +40,11 @@ tasks:
   - id: log_transformed_batch
     type: io.kestra.plugin.core.log.Log
     message: "Built canonical daily bars after extract run {{ inputs.extract_run_id }}."
+
+errors:
+  - id: log_transform_failure
+    type: io.kestra.plugin.core.log.Log
+    level: ERROR
+    message: |
+      dbt build failed in execution {{ execution.id }}.
+      Raw GCS and BigQuery data remain available; fix the model or test and rerun transformation.
