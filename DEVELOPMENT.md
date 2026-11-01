@@ -1,8 +1,8 @@
-# Development Environment Runbook
+# Development Runbook
 
-This runbook reproduces the local development environment, provisions the
-development cloud resources, runs the automated checks, executes a complete
-Kestra daily-bars backfill, and verifies its GCS and BigQuery outputs.
+This runbook describes how to reproduce the development environment, provision
+its cloud resources, run the automated checks, and verify a complete daily-bars
+backfill.
 
 The local Compose setup currently targets Linux or WSL because it mounts the
 Docker socket and the Google Application Default Credentials file from the
@@ -130,7 +130,7 @@ echo "$RAW_BUCKET"
 
 ## Start a development session
 
-Use these steps after restarting the computer or returning to the project.
+Use these steps for each development session.
 
 ### 1. Verify local services and authentication
 
@@ -203,35 +203,17 @@ uv run python scripts/sync_kestra_kv.py
 ```
 
 Run this command after the first startup, after resetting Kestra's volumes, or
-after changing Terraform outputs or `PIPELINE_IMAGE`. Terraform remains the
-source of truth for the project, location, bucket, and dataset names; `.env`
-remains the source of truth for the local image tag.
+after changing Terraform outputs or `PIPELINE_IMAGE`. Terraform supplies the
+cloud resource identifiers, while `.env` supplies the local image tag. The
+script publishes those values to the `equity.dev` namespace in Kestra.
 
-The image value reaches a flow through this sequence:
-
-1. `.env` defines `PIPELINE_IMAGE`, such as `equity-data-platform:dev`.
-2. Docker Compose uses that value when it builds and tags the local image.
-3. `scripts/sync_kestra_kv.py` reads the same `.env` value.
-4. The script sends it to Kestra's namespace KV API as
-   `equity.dev/PIPELINE_IMAGE`.
-5. A task resolves `{{ kv('PIPELINE_IMAGE') }}` when its execution starts.
-
-Kestra stores the KV entry in its local persistent state; it does not read the
-project's `.env` file directly. Resetting the Kestra Compose volumes therefore
-deletes the KV entry, which is why the synchronization command must be rerun.
-If the image tag changes, rebuild the image and synchronize the KV value:
+If the image tag changes, rebuild the image and synchronize the namespace
+configuration:
 
 ```bash
 docker compose --profile build build pipeline-image
 uv run python scripts/sync_kestra_kv.py
 ```
-
-A Kestra bootstrap flow containing `io.kestra.plugin.core.kv.Set` tasks could
-also create these entries. That pattern is useful for a small tutorial with
-manually chosen constants. This project instead synchronizes Terraform outputs
-so bucket and dataset names are not copied into a second flow and allowed to
-drift. The script is the bridge between the Terraform source of truth, the
-local image configuration, and Kestra's KV API.
 
 The `flows/` directory is mounted read-only and watched by Kestra. Four flows
 should appear automatically:
@@ -255,7 +237,8 @@ Through the Kestra UI:
 1. Open **Flows**.
 2. Select `equity.dev.daily_bars_backfill`.
 3. Select **Execute**.
-4. Enter an inclusive historical date range and one or more stock symbols.
+4. Enter an inclusive historical date range. Leave `symbols` empty to use the
+   universe in `config.toml`, or supply an array to override it for this run.
 5. Start the execution and inspect each task.
 
 For a command-line smoke test, choose a known US trading day:
@@ -298,37 +281,17 @@ gcloud storage ls --recursive \
   "gs://${RAW_BUCKET}/daily_bars/batch_start=${TEST_START_DATE}/batch_end=${TEST_END_DATE}/"
 ```
 
-A trading-day run currently contains these objects beneath its unique extract
-execution ID:
+A successful trading-day run contains a completion manifest and one or more
+Parquet files beneath a unique execution ID:
 
 ```text
 part-00000.parquet
 manifest.json
 ```
 
-The current Python producer writes one Arrow table to one Parquet file, so a
-nonempty batch currently has exactly one part. Parquet does not automatically
-create multiple files. A later producer can deliberately split a batch by a
-maximum row count, target file size, symbol partition, or another policy, which
-would produce `part-00001.parquet`, `part-00002.parquet`, and so forth.
-
-The orchestration is already ready for that change: the extract flow discovers
-and uploads every `part-*.parquet` file, while the load flow passes the GCS
-`part-*.parquet` wildcard to BigQuery. `concurrencyLimit: 4` controls how many
-uploads run simultaneously; it does not impose a four-file maximum.
-
-There is no project-defined maximum number of parts yet because the producer
-cannot create more than one. If multipart output is introduced, define a target
-file size and an explicit per-batch safety limit instead of relying on the much
-larger platform limit. BigQuery currently permits up to 10 million files and
-15 TB in one load job:
-<https://cloud.google.com/bigquery/quotas#load_jobs>.
-
-Multipart writing is intentionally deferred for daily bars. At the initial
-scale, splitting them would create many inefficient small files without solving
-a real size problem. Introduce a reusable row-count or target-size splitter
-when high-volume trades or quotes are added, then reuse it for bars only if bar
-batches become large enough to justify it.
+The current daily-bars producer writes one Parquet part. The flow already uses
+the `part-*.parquet` convention so multipart output can be introduced later
+without changing the storage contract.
 
 Copy the complete manifest URI from the listing and inspect it with:
 
@@ -340,6 +303,16 @@ Identical retries and overlapping backfills are intentionally retained in raw
 GCS and the append-only raw BigQuery table. The dbt canonical model uses the
 bar key and ingestion metadata to retain the newest observation for each
 logical bar.
+
+To inspect all daily-bars runs or retained object generations, use:
+
+```bash
+gcloud storage ls --recursive "gs://${RAW_BUCKET}/daily_bars/**"
+gcloud storage ls --all-versions --recursive "gs://${RAW_BUCKET}/daily_bars/**"
+```
+
+See [Reliability and recovery](PIPELINE_RELIABILITY.md) for the storage commit
+protocol, retry boundaries, and recovery policy.
 
 ### 7. Verify BigQuery and dbt outputs
 

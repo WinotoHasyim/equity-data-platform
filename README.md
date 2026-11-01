@@ -139,6 +139,15 @@ See the [development environment runbook](DEVELOPMENT.md) for prerequisites,
 cloud provisioning, local startup, tests, Kestra execution, GCS verification,
 shutdown, and recovery instructions.
 
+## Project documentation
+
+- [Development runbook](DEVELOPMENT.md) — reproduce the development environment
+  and run the batch pipeline end to end.
+- [Reliability and recovery](PIPELINE_RELIABILITY.md) — data contracts, failure
+  boundaries, retry behavior, and remaining production controls.
+- [Streaming ingestion design](STREAMING_INGESTION.md) — planned relationship
+  between live market events, historical backfills, and reconciliation.
+
 ## Project roadmap
 
 1. Complete the local historical daily-bars producer and Docker image. ✅
