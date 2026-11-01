@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import math
 import shutil
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -99,6 +100,17 @@ class DailyBarsBatchRequest:
             raise ValueError("start_date must not be later than end_date")
         if not self.symbols:
             raise ValueError("At least one stock symbol is required")
+        if len(set(self.symbols)) != len(self.symbols):
+            raise ValueError("Stock symbols must be unique within a batch request")
+        non_normalized = [
+            symbol
+            for symbol in self.symbols
+            if symbol != symbol.strip().upper()
+        ]
+        if non_normalized:
+            raise ValueError(
+                f"Stock symbols must be normalized uppercase values: {non_normalized}"
+            )
 
     @property
     def batch_key(self) -> str:
@@ -211,7 +223,33 @@ def fetch_market_sessions(
 ) -> tuple[date, ...]:
     calendar_request = GetCalendarRequest(start=start_date, end=end_date)
     calendar = call_with_retries(lambda: trading_client.get_calendar(calendar_request))
-    return tuple(session.date for session in calendar)
+    try:
+        sessions = tuple(session.date for session in calendar)
+    except (AttributeError, TypeError) as exc:
+        raise DataValidationError("Alpaca returned a malformed market calendar") from exc
+
+    invalid_sessions = [
+        session
+        for session in sessions
+        if not isinstance(session, date)
+        or isinstance(session, datetime)
+        or not start_date <= session <= end_date
+    ]
+    if invalid_sessions:
+        raise DataValidationError(
+            f"Market calendar contains invalid or out-of-range dates: "
+            f"{invalid_sessions[:10]}"
+        )
+    if tuple(sorted(set(sessions))) != sessions:
+        raise DataValidationError(
+            "Market calendar dates must be unique and in ascending order"
+        )
+    if not sessions and (end_date - start_date).days >= 6:
+        raise DataValidationError(
+            "Alpaca returned no market sessions for an interval of seven or more "
+            "calendar days; refusing to publish a possibly false empty batch"
+        )
+    return sessions
 
 
 def fetch_daily_bars(
@@ -221,10 +259,15 @@ def fetch_daily_bars(
     response = call_with_retries(
         lambda: historical_client.get_stock_bars(build_stock_bars_request(request))
     )
-    frame = response.df.reset_index()
+    try:
+        frame = response.df.reset_index()
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise DataValidationError("Alpaca returned a malformed bar response") from exc
     if frame.empty:
         return pd.DataFrame(columns=SOURCE_COLUMNS)
-    return frame.loc[:, list(SOURCE_COLUMNS)].copy()
+    # Preserve the response until validation so a missing source column produces
+    # a deliberate contract error instead of an incidental pandas KeyError.
+    return frame.copy()
 
 
 def validate_daily_bars(
@@ -263,6 +306,14 @@ def validate_daily_bars(
             f"Daily bars contain {invalid_timestamps} invalid timestamps"
         )
 
+    naive_timestamp_count = int(
+        frame["timestamp"].map(lambda value: pd.Timestamp(value).tzinfo is None).sum()
+    )
+    if naive_timestamp_count:
+        raise DataValidationError(
+            f"Daily bars contain {naive_timestamp_count} timezone-naive timestamps"
+        )
+
     symbols = frame["symbol"].astype("string").str.upper()
     duplicate_count = int(
         pd.DataFrame({"symbol": symbols, "timestamp": timestamps})
@@ -275,23 +326,44 @@ def validate_daily_bars(
         )
 
     price_columns = ["open", "high", "low", "close"]
-    invalid_ohlc = (frame["high"] != frame[price_columns].max(axis=1)) | (
-        frame["low"] != frame[price_columns].min(axis=1)
+    numeric_columns = [*price_columns, "volume", "trade_count", "vwap"]
+    numeric = frame[numeric_columns].apply(pd.to_numeric, errors="coerce")
+    invalid_numeric = numeric.map(lambda value: not math.isfinite(float(value))).any(
+        axis=1
+    )
+    if invalid_numeric.any():
+        raise DataValidationError(
+            f"Daily bars contain {int(invalid_numeric.sum())} non-numeric or "
+            "non-finite rows"
+        )
+
+    non_positive_prices = (numeric[[*price_columns, "vwap"]] <= 0).any(axis=1)
+    if non_positive_prices.any():
+        raise DataValidationError(
+            f"Daily bars contain {int(non_positive_prices.sum())} rows with "
+            "non-positive prices"
+        )
+
+    invalid_ohlc = (numeric["high"] != numeric[price_columns].max(axis=1)) | (
+        numeric["low"] != numeric[price_columns].min(axis=1)
     )
     if invalid_ohlc.any():
         raise DataValidationError(
             f"Daily bars contain {int(invalid_ohlc.sum())} invalid OHLC rows"
         )
 
-    if (frame["volume"] < 0).any():
+    if (numeric["volume"] < 0).any():
         raise DataValidationError("Daily bars contain negative volume")
-    if (frame["trade_count"] < 0).any():
+    if (numeric["trade_count"] < 0).any():
         raise DataValidationError("Daily bars contain negative trade_count")
-    if ((frame["vwap"] < frame["low"]) | (frame["vwap"] > frame["high"])).any():
+    if (
+        (numeric["vwap"] < numeric["low"])
+        | (numeric["vwap"] > numeric["high"])
+    ).any():
         raise DataValidationError("Daily bars contain VWAP outside low/high")
 
     for column in ("volume", "trade_count"):
-        non_integral = frame[column].map(lambda value: float(value).is_integer())
+        non_integral = numeric[column].map(lambda value: float(value).is_integer())
         if not non_integral.all():
             raise DataValidationError(f"Daily bars contain non-integral {column}")
 

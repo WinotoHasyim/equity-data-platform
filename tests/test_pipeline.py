@@ -11,6 +11,13 @@ def test_cli_requires_both_dates() -> None:
         parser.parse_args([])
 
 
+def test_cli_omits_symbol_override_by_default() -> None:
+    args = build_parser().parse_args(
+        ["--start-date", "2026-10-01", "--end-date", "2026-10-02"]
+    )
+    assert args.symbols is None
+
+
 def test_cli_parses_inclusive_dates_and_repeatable_symbols() -> None:
     args = build_parser().parse_args(
         [
