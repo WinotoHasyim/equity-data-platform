@@ -1,3 +1,15 @@
+{{
+    config(
+        materialized='table',
+        partition_by={
+            'field': 'timestamp',
+            'data_type': 'timestamp',
+            'granularity': 'day'
+        },
+        cluster_by=['symbol', 'feed']
+    )
+}}
+
 with ranked as (
     select
         *,

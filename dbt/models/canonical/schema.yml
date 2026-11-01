@@ -18,3 +18,15 @@ models:
       - name: payload_fingerprint
         data_tests:
           - not_null
+      - name: run_id
+        data_tests:
+          - not_null
+      - name: ingested_at
+        data_tests:
+          - not_null
+      - name: volume
+        data_tests:
+          - not_null
+      - name: trade_count
+        data_tests:
+          - not_null
