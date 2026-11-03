@@ -16,6 +16,9 @@ env/
 .ruff_cache/
 .coverage
 htmlcov/
+dbt/logs/
+dbt/target/
+.github/dbt/.user.yml
 
 # ==========================================
 # Jupyter
@@ -90,4 +93,5 @@ Thumbs.db
 # VS Code local project settings (optional)
 # .vscode/
 
-docs/
+# Private learning notes. Public project documentation under docs/ remains tracked.
+docs/project_course.md
