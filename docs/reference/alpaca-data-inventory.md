@@ -4,6 +4,9 @@ This is a static reference captured from the public interfaces available in
 `alpaca-py==0.44.0`. Review it against the SDK documentation when upgrading
 `alpaca-py`.
 
+This document supports dataset selection and schema design. It is reference
+material rather than a claim that every listed dataset has been implemented.
+
 ## Available stock-related data
 
 | Category | Data name | Delivery | Client class | Method | Request class | Request or subscription arguments | SDK method return | Record model(s) |

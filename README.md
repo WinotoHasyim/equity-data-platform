@@ -1,165 +1,163 @@
 # Equity Data Platform
 
-> Real-time market surveillance and liquidity intelligence for US equities.
+An end-to-end batch data pipeline for historical US equity market data, built as
+the foundation for a future real-time market-surveillance platform.
 
-Equity Data Platform monitors a configurable universe of stocks using Alpaca
-market data. It combines real-time trades, quotes, bars, trading statuses, and
-trade corrections with historical backfills to surface changing market
-conditions through an analytical application.
+The implemented pipeline extracts daily stock bars from Alpaca, validates and
+publishes immutable Parquet batches to Google Cloud Storage, loads raw
+observations into BigQuery, and builds a canonical table with dbt. Kestra
+coordinates the workflow and Terraform provisions the cloud resources.
+
+## Current implementation
+
+The repository currently provides one complete vertical slice for historical
+daily bars:
+
+| Capability | Status |
+| --- | --- |
+| Configurable stock universe and inclusive backfill dates | Implemented |
+| Source, schema, value, and market-session validation | Implemented |
+| Typed Parquet output with checksums and a completion manifest | Implemented |
+| Immutable raw batches in Google Cloud Storage | Implemented |
+| Append-only raw loading into BigQuery | Implemented |
+| dbt staging, canonical deduplication, and data tests | Implemented |
+| Kestra extract, load, and transform child flows | Implemented |
+| Terraform-managed GCS and BigQuery resources | Implemented |
+| Kafka and Alpaca WebSocket ingestion | Planned |
+| Liquidity marts, alerts, and analyst dashboard | Planned |
+
+### Current architecture
+
+```mermaid
+flowchart LR
+    A[Alpaca Historical API] --> B[Python extraction and validation]
+    B --> C[Typed Parquet and manifest]
+    C --> D[(GCS raw batches)]
+    D --> E[(BigQuery raw)]
+    E --> F[dbt staging and canonical models]
+    K[Kestra] -. orchestrates .-> B
+    K -. orchestrates .-> E
+    K -. orchestrates .-> F
+    T[Terraform] -. provisions .-> D
+    T -. provisions .-> E
+```
+
+The initial universe contains AAPL, MSFT, NVDA, AMZN, and META. Symbols are
+configuration-driven and can be overridden for targeted backfills without
+changing Python source code.
+
+See [sample pipeline output](docs/examples/daily-bars-output.md) for a manifest
+excerpt and Parquet record from a local run.
 
 ## Why this project exists
 
-Analysts monitoring many companies cannot manually follow every price move,
-spread change, volume spike, trading halt, or corrected trade. Important
-signals are distributed across several event streams and are difficult to
-interpret without historical context.
+Analysts need a trustworthy historical baseline before they can decide whether
+current price, volume, or liquidity behavior is unusual. A baseline assembled
+from overlapping requests and provider updates can otherwise contain repeated
+or inconsistent observations.
 
-This platform creates a unified view of live and historical activity so an
-analyst can answer:
+The pipeline preserves the source observations and exposes one deterministic
+version of each daily bar for analysis. This historical layer will later provide
+the comparison baseline for the planned live market-surveillance application.
 
-- Which symbols are experiencing unusual price or volume behavior?
-- Where are bid/ask spreads widening and liquidity deteriorating?
-- Which securities have been halted or resumed?
-- Have corrections or cancellations changed the observed trade history?
-- Is current activity abnormal compared with historical baselines?
+## Data contract
 
-The goal is market monitoring and research prioritization—not automated trading
-or investment advice.
+Each bar contains the source OHLCV values, trade count, and VWAP together with:
 
-## What it does
+- source, feed, timeframe, and adjustment
+- run and deterministic batch identifiers
+- a logical bar key and payload fingerprint
+- ingestion timestamp and schema version
 
-The platform is built in five layers:
+A batch is considered complete only after all Parquet parts pass validation and
+its manifest has been published. Repeated and overlapping runs remain in the
+raw layer. The canonical table selects the latest accepted observation for each
+bar key.
 
-| Layer | Responsibility |
-| --- | --- |
-| Ingestion | Alpaca WebSocket events are consumed continuously; historical APIs backfill gaps and bootstrap history |
-| Streaming | Kafka buffers and distributes trades, quotes, bars, statuses, corrections, and cancellations |
-| Storage | BigQuery retains live observations; Parquet in GCS preserves historical batches and backfills |
-| Analytics | BigQuery and dbt build reconciled market history, baselines, and analytical marts |
-| Serving | A dashboard presents live conditions, alerts, historical comparisons, and data coverage |
+## Planned product direction
 
-Kestra orchestrates deployments, historical backfills, recovery workflows, and
-downstream transformations. Terraform provisions the cloud infrastructure.
-
-## Architecture
+The longer-term goal is real-time market surveillance and liquidity
+intelligence. The planned streaming path is intentionally separate from the
+implemented historical path:
 
 ```mermaid
 flowchart LR
     A[Alpaca WebSocket] --> B[Kafka]
     B --> C[Stream consumers]
-    C --> R[(BigQuery raw streaming)]
+    C --> R[(BigQuery raw live data)]
 
     H[Alpaca Historical API] --> I[Backfill pipeline]
     I --> D[(GCS historical Parquet)]
+    D --> E[(BigQuery raw history)]
 
-    D --> E[(BigQuery raw batch)]
-    E --> F[dbt models]
-    R --> F
-    F --> G[Market surveillance dashboard]
-
-    K[Kestra] -. orchestrates .-> I
-    K -. recovery and transformations .-> E
-    T[Terraform] -. provisions .-> D
-    T -. provisions .-> E
+    R --> F[dbt reconciliation and marts]
+    E --> F
+    F --> G[Market-surveillance application]
 ```
 
-## Market intelligence produced
-
-The planned application combines live monitoring with historical context:
-
-- Price and return movements across the configured watchlist
-- Abnormal volume and trade activity
-- Bid/ask spread and displayed-liquidity changes
-- Intraday and rolling volatility
-- Trading halts and resumptions
-- Trade correction and cancellation activity
-- Data freshness, coverage, and ingestion health
-- Historical company comparison and drawdown analysis
-
-## Data sources
-
-### Primary: real-time streaming
-
-- Trades
-- Quotes
-- Minute bars and updated bars
-- Daily bars
-- Trading-status events
-- Trade corrections
-- Trade cancellations/errors
-
-### Recovery and history: batch APIs
-
-- Historical bars
-- Historical trades
-- Historical quotes
-- Corporate actions
-- Asset metadata
-- Market calendar
-
-Historical jobs bootstrap analytical baselines, repair missing periods, and
-perform controlled backfills. They are not the primary ingestion path once the
-streaming pipeline is operational.
-
-## Initial implementation
-
-The first vertical slice uses historical daily bars to establish the shared
-contracts for configuration, validation, typed Parquet batches, manifests,
-testing, and containerized execution. Kestra now coordinates extraction, GCS
-publication, append-only BigQuery loading, and dbt canonicalization as separate
-retryable child flows.
-
-The initial stock universe is:
-
-```text
-AAPL, MSFT, NVDA, AMZN, META
-```
-
-The universe is configuration-driven and can be expanded without changing
-Python source code.
+This phase will add trades, quotes, updated bars, trading statuses, trade
+corrections, and cancellations. Live observations will remain provisional until
+they are reconciled against a later historical response.
 
 ## Technology stack
 
-| Area | Technology |
+| Area | Current technology |
 | --- | --- |
-| Market data | Alpaca historical and WebSocket APIs |
-| Extraction and consumers | Python, alpaca-py, PyArrow |
-| Event streaming | Apache Kafka |
+| Market data | Alpaca historical API and IEX feed |
+| Extraction and validation | Python, alpaca-py, pandas, PyArrow |
 | Raw data lake | Google Cloud Storage and Parquet |
 | Data warehouse | BigQuery |
 | Transformation and testing | dbt |
 | Orchestration | Kestra |
 | Infrastructure as code | Terraform |
 | Containerization | Docker |
-| Application layer | To be selected after the analytical marts are stable |
 
-## Development
+Apache Kafka and an analyst-facing application belong to the planned streaming
+phase and are not part of the current implementation.
 
-See the [development environment runbook](DEVELOPMENT.md) for prerequisites,
-cloud provisioning, local startup, tests, Kestra execution, GCS verification,
-shutdown, and recovery instructions.
+## Run the project
 
-## Project documentation
+See the [development runbook](DEVELOPMENT.md) for prerequisites, cloud
+provisioning, local startup, automated checks, Kestra execution, verification,
+and recovery instructions.
 
-- [Development runbook](DEVELOPMENT.md) — reproduce the development environment
-  and run the batch pipeline end to end.
-- [Reliability and recovery](PIPELINE_RELIABILITY.md) — data contracts, failure
-  boundaries, retry behavior, and remaining production controls.
-- [Streaming ingestion design](STREAMING_INGESTION.md) — planned relationship
-  between live market events, historical backfills, and reconciliation.
+The local automated checks are:
 
-## Project roadmap
+```bash
+uv sync --frozen
+uv run ruff check src tests scripts
+uv run pytest -q
+terraform -chdir=terraform fmt -check
+terraform -chdir=terraform validate
+```
 
-1. Complete the local historical daily-bars producer and Docker image. ✅
-2. Provision GCS and BigQuery with Terraform. ✅
-3. Orchestrate backfills and daily-bar reconciliation with Kestra and dbt. ✅
-4. Ingest real-time Alpaca events through Kafka.
-5. Reconcile streaming and historical observations in BigQuery with dbt.
-6. Build market-surveillance and liquidity marts.
-7. Deliver the analyst-facing monitoring application.
+## Documentation
 
-## Data limitation
+- [Development runbook](DEVELOPMENT.md) explains how to reproduce and operate
+  the development environment.
+- [Reliability and recovery](PIPELINE_RELIABILITY.md) documents validation,
+  retry boundaries, failure behavior, and remaining production controls.
+- [Streaming ingestion design](STREAMING_INGESTION.md) is the accepted proposal
+  for the future live-data path.
+- [Alpaca stock-data inventory](docs/reference/alpaca-data-inventory.md) records
+  the stock-related SDK interfaces evaluated for later datasets.
 
-The project currently uses Alpaca's free IEX feed. IEX represents only part of
-US market activity, so the application reports IEX-observed conditions rather
-than claiming complete consolidated-market coverage.
+## Roadmap
+
+1. Historical daily-bars producer and Docker image. Complete.
+2. GCS and BigQuery infrastructure managed by Terraform. Complete.
+3. Kestra backfills and dbt canonicalization. Complete.
+4. Continuous integration checks for Python, Terraform, and dbt. Configured.
+5. Real-time Alpaca ingestion through Kafka.
+6. Streaming and historical reconciliation in BigQuery and dbt.
+7. Market-surveillance and liquidity marts.
+8. Analyst-facing monitoring application.
+
+## Current limitations
+
+- The implemented dataset contains historical daily bars only.
+- Large requests are not yet chunked and should remain bounded.
+- The development environment uses local Kestra, local Terraform state, and
+  developer Application Default Credentials.
+- Alpaca's free IEX feed represents only part of US market activity. Results
+  describe IEX-observed conditions rather than the complete consolidated market.
