@@ -10,10 +10,10 @@ permissions:
 jobs:
   python:
     name: Python checks
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v7
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.3
         with:
           enable-cache: true
       - run: uv sync --frozen
@@ -22,31 +22,29 @@ jobs:
 
   terraform:
     name: Terraform checks
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: hashicorp/setup-terraform@v3
+      - uses: actions/checkout@v7
+      - uses: hashicorp/setup-terraform@v4
       - run: terraform -chdir=terraform fmt -check
       - run: terraform -chdir=terraform init -backend=false
       - run: terraform -chdir=terraform validate
 
   dbt:
-    name: dbt compile
-    runs-on: ubuntu-latest
+    name: dbt parse
+    runs-on: ubuntu-24.04
     env:
       DBT_GCP_PROJECT_ID: equity-data-platform-ci
       DBT_RAW_DATASET: equity_raw
       DBT_ANALYTICS_DATASET: equity_analytics
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v7
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.3
         with:
           enable-cache: true
       - run: uv sync --frozen
-      - name: Compile dbt project without warehouse introspection
+      - name: Parse dbt project without warehouse credentials
         run: >-
-          uv run dbt compile
+          uv run dbt parse
           --project-dir dbt
           --profiles-dir .github/dbt
-          --no-introspect
-          --empty

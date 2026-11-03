@@ -169,9 +169,9 @@ The Terraform plan should report no changes unless the infrastructure
 configuration was intentionally modified.
 
 The GitHub Actions workflow runs the Python checks, Terraform formatting and
-validation, and an offline dbt compilation on every push and pull request. It
+validation, and an offline dbt parse on every push and pull request. It
 does not receive Alpaca or Google Cloud credentials and therefore does not run
-a live extraction or apply infrastructure changes.
+a warehouse-connected dbt build, live extraction, or infrastructure changes.
 
 ### 3. Build the pipeline image
 

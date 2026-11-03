@@ -147,7 +147,7 @@ terraform -chdir=terraform validate
 1. Historical daily-bars producer and Docker image. Complete.
 2. GCS and BigQuery infrastructure managed by Terraform. Complete.
 3. Kestra backfills and dbt canonicalization. Complete.
-4. Continuous integration checks for Python, Terraform, and dbt. Configured.
+4. Continuous integration checks for Python, Terraform, and dbt parsing. Configured.
 5. Real-time Alpaca ingestion through Kafka.
 6. Streaming and historical reconciliation in BigQuery and dbt.
 7. Market-surveillance and liquidity marts.
