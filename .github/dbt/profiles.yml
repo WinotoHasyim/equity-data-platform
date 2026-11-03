@@ -1,0 +1,11 @@
+equity_data_platform:
+  target: ci
+  outputs:
+    ci:
+      type: bigquery
+      method: oauth
+      project: "{{ env_var('DBT_GCP_PROJECT_ID') }}"
+      dataset: "{{ env_var('DBT_ANALYTICS_DATASET') }}"
+      location: US
+      threads: 1
+      priority: interactive
