@@ -20,7 +20,7 @@ inputs:
     required: false
     description: |
       Optional company-stock-symbol override. An empty value makes the CLI use
-      the symbols from config.toml packaged in the pipeline image.
+      the symbols from ingestion/config.toml packaged in the pipeline image.
 
 tasks:
   - id: extract_daily_bars

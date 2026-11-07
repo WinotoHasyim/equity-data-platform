@@ -12,7 +12,7 @@ tasks:
     type: io.kestra.plugin.dbt.cli.DbtCLI
     timeout: PT30M
     containerImage: "{{ kv('PIPELINE_IMAGE') }}"
-    projectDir: /app/dbt
+    projectDir: /app/analytics/dbt
     taskRunner:
       type: io.kestra.plugin.scripts.runner.docker.Docker
       pullPolicy: NEVER

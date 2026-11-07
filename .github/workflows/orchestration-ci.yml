@@ -1,0 +1,45 @@
+name: Orchestration CI
+
+on:
+  push:
+    paths:
+      - "orchestration/kestra/**"
+      - "ingestion/Dockerfile"
+      - "ingestion/pyproject.toml"
+      - "ingestion/uv.lock"
+      - ".dockerignore"
+      - ".env.example"
+      - ".github/workflows/orchestration-ci.yml"
+  pull_request:
+    paths:
+      - "orchestration/kestra/**"
+      - "ingestion/Dockerfile"
+      - "ingestion/pyproject.toml"
+      - "ingestion/uv.lock"
+      - ".dockerignore"
+      - ".env.example"
+      - ".github/workflows/orchestration-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  compose:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.3
+        with:
+          enable-cache: true
+          cache-dependency-glob: ingestion/uv.lock
+      - run: uv sync --project ingestion --frozen
+      - name: Validate checked-in flow structure
+        run: >-
+          uv run --project ingestion python
+          orchestration/kestra/scripts/validate_flows.py
+      - name: Validate Docker Compose configuration
+        run: >-
+          docker compose
+          --env-file .env.example
+          -f orchestration/kestra/docker-compose.yaml
+          config --quiet

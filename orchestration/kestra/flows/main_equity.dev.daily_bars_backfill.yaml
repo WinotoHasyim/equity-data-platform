@@ -23,7 +23,7 @@ inputs:
     required: false
     description: |
       Optional company-stock-symbol override. When omitted, extraction uses
-      the symbols checked into config.toml in the pipeline image.
+      the symbols checked into ingestion/config.toml in the pipeline image.
 
 tasks:
   - id: extract

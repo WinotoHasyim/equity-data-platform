@@ -16,8 +16,9 @@ env/
 .ruff_cache/
 .coverage
 htmlcov/
-dbt/logs/
-dbt/target/
+analytics/dbt/dbt_packages/
+analytics/dbt/logs/
+analytics/dbt/target/
 .github/dbt/.user.yml
 
 # ==========================================

@@ -8,7 +8,7 @@ from pathlib import Path
 
 from env_utils import read_env
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 SOURCE_PATH = PROJECT_ROOT / ".env"
 TARGET_PATH = PROJECT_ROOT / ".env.kestra"
 REQUIRED_KEYS = ("APCA_API_KEY_ID", "APCA_API_SECRET_KEY")

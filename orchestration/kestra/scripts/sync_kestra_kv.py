@@ -12,14 +12,14 @@ from urllib.request import Request, urlopen
 
 from env_utils import read_env
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 ENV_PATH = PROJECT_ROOT / ".env"
 NAMESPACE = "equity.dev"
 
 
 def terraform_outputs() -> dict[str, object]:
     result = subprocess.run(
-        ["terraform", "-chdir=terraform", "output", "-json"],
+        ["terraform", "-chdir=infrastructure/terraform", "output", "-json"],
         cwd=PROJECT_ROOT,
         check=True,
         capture_output=True,

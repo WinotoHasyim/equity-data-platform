@@ -4,8 +4,8 @@ services:
   pipeline-image:
     profiles: ["build"]
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ../..
+      dockerfile: ingestion/Dockerfile
     image: ${PIPELINE_IMAGE:-equity-data-platform:dev}
     entrypoint: ["/bin/true"]
     restart: "no"
@@ -33,7 +33,7 @@ services:
     command: server standalone
     restart: "no"
     env_file:
-      - path: .env.kestra
+      - path: ../../.env.kestra
         required: false
     environment:
       GOOGLE_APPLICATION_CREDENTIALS: /var/secrets/google/application_default_credentials.json
