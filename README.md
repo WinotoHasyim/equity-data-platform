@@ -156,6 +156,8 @@ filters run only the checks relevant to the changed component.
   retry boundaries, failure behavior, and remaining production controls.
 - [Streaming ingestion design](STREAMING_INGESTION.md) is the accepted proposal
   for the future live-data path.
+- [Multi-source platform plan](docs/multi-source-platform-plan.md) defines the
+  planned providers, canonical models, analytical marts, and delivery order.
 - [Alpaca stock-data inventory](docs/reference/alpaca-data-inventory.md) records
   the stock-related SDK interfaces evaluated for later datasets.
 
