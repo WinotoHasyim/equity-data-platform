@@ -9,7 +9,7 @@ FLOW_DIRECTORY = Path(__file__).resolve().parents[1] / "flows"
 
 def main() -> None:
     identities: set[tuple[str, str]] = set()
-    flow_paths = sorted(FLOW_DIRECTORY.glob("*.yaml"))
+    flow_paths = sorted(FLOW_DIRECTORY.rglob("*.yaml"))
     if not flow_paths:
         raise SystemExit(f"No Kestra flows found in {FLOW_DIRECTORY}")
 
