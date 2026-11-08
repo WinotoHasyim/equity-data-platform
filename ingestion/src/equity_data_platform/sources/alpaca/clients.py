@@ -15,12 +15,17 @@ def create_historical_client(
     )
 
 
-def create_trading_client(settings: Settings | None = None) -> TradingClient:
-    """Create the client used for the official US market calendar."""
+def create_trading_client(
+    settings: Settings | None = None,
+    *,
+    raw_data: bool = False,
+) -> TradingClient:
+    """Create an Alpaca trading/reference-data client."""
 
     settings = settings or get_settings()
     return TradingClient(
         api_key=settings.alpaca_api_key.get_secret_value(),
         secret_key=settings.alpaca_secret_key.get_secret_value(),
         paper=True,
+        raw_data=raw_data,
     )
