@@ -57,6 +57,7 @@ def main() -> None:
                 "KESTRA_ADMIN_EMAIL",
                 "KESTRA_ADMIN_PASSWORD",
                 "KESTRA_URL",
+                "DBT_IMAGE",
                 "PIPELINE_IMAGE",
             )
             if key in os.environ
@@ -95,6 +96,7 @@ def main() -> None:
         "GCP_LOCATION": outputs["location"],
         "GCP_PROJECT_ID": outputs["project_id"],
         "GCS_RAW_BUCKET": outputs["raw_bucket_name"],
+        "DBT_IMAGE": env.get("DBT_IMAGE", "equity-data-platform-dbt:dev"),
         "PIPELINE_IMAGE": env.get("PIPELINE_IMAGE", "equity-data-platform:dev"),
     }
 

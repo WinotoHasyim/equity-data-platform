@@ -9,7 +9,6 @@ WORKDIR /app
 
 COPY ingestion/pyproject.toml ingestion/uv.lock ingestion/README.md ingestion/config.toml ./
 COPY ingestion/src ./src
-COPY analytics/dbt ./analytics/dbt
 
 RUN uv sync --frozen --no-dev \
     && useradd --create-home --uid 10001 appuser \

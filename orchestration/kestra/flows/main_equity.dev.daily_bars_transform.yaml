@@ -11,7 +11,7 @@ tasks:
   - id: dbt_build_daily_bars
     type: io.kestra.plugin.dbt.cli.DbtCLI
     timeout: PT30M
-    containerImage: "{{ kv('PIPELINE_IMAGE') }}"
+    containerImage: "{{ kv('DBT_IMAGE') }}"
     projectDir: /app/analytics/dbt
     taskRunner:
       type: io.kestra.plugin.scripts.runner.docker.Docker

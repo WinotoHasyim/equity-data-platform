@@ -10,6 +10,15 @@ services:
     entrypoint: ["/bin/true"]
     restart: "no"
 
+  dbt-image:
+    profiles: ["build"]
+    build:
+      context: ../..
+      dockerfile: analytics/dbt/Dockerfile
+    image: ${DBT_IMAGE:-equity-data-platform-dbt:dev}
+    entrypoint: ["/bin/true"]
+    restart: "no"
+
   kestra-postgres:
     image: postgres:17
     restart: "no"

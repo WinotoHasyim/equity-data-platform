@@ -49,7 +49,8 @@ tasks:
         run_id = os.environ["BATCH_RUN_ID"]
         batch_path = Path("daily_bars") / f"run_id={run_id}"
         command = [
-            "/app/.venv/bin/equity-data-platform",
+            "/app/.venv/bin/equity-ingest",
+            "daily-bars",
             "--start-date",
             os.environ["BATCH_START_DATE"],
             "--end-date",
