@@ -11,7 +11,9 @@ from env_utils import read_env
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 SOURCE_PATH = PROJECT_ROOT / ".env"
 TARGET_PATH = PROJECT_ROOT / ".env.kestra"
-REQUIRED_KEYS = ("APCA_API_KEY_ID", "APCA_API_SECRET_KEY")
+REQUIRED_KEYS = ("APCA_API_KEY_ID", "APCA_API_SECRET_KEY", "SEC_USER_AGENT")
+
+
 def main() -> None:
     if not SOURCE_PATH.is_file():
         raise SystemExit(f"Missing {SOURCE_PATH}; create it from .env.example first")

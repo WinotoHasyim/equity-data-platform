@@ -1,0 +1,62 @@
+id: sec_filings_load
+namespace: equity.dev
+
+description: Load one immutable SEC filing batch into the append-only BigQuery raw table.
+
+inputs:
+  - id: extract_run_id
+    type: STRING
+  - id: parquet_uri
+    type: STRING
+  - id: expected_rows
+    type: INT
+
+tasks:
+  - id: load_raw_sec_filings
+    type: io.kestra.plugin.gcp.bigquery.LoadFromGcs
+    timeout: PT30M
+    retry:
+      type: exponential
+      interval: PT5S
+      maxInterval: PT1M
+      maxAttempts: 3
+      maxDuration: PT1H35M
+      warningOnRetry: true
+    projectId: "{{ kv('GCP_PROJECT_ID') }}"
+    location: "{{ kv('GCP_LOCATION') }}"
+    from: ["{{ inputs.parquet_uri }}"]
+    destinationTable: "{{ kv('GCP_PROJECT_ID') }}.{{ kv('BQ_RAW_DATASET') }}.sec_filings"
+    format: PARQUET
+    createDisposition: CREATE_IF_NEEDED
+    writeDisposition: WRITE_APPEND
+    timePartitioningField: filing_date
+    timePartitioningType: DAY
+    clusteringFields: [symbol, form]
+  - id: assert_loaded_rows
+    type: io.kestra.plugin.core.execution.Assert
+    conditions:
+      - "{{ outputs.load_raw_sec_filings.rows == inputs.expected_rows }}"
+    errorMessage: BigQuery load row count does not match the SEC extraction manifest.
+
+  - id: log_loaded_batch
+    type: io.kestra.plugin.core.log.Log
+    message: |
+      Loaded SEC extract {{ inputs.extract_run_id }} into
+      {{ outputs.load_raw_sec_filings.destinationTable }}.
+      Rows loaded: {{ outputs.load_raw_sec_filings.rows }} of {{ inputs.expected_rows }} expected.
+
+errors:
+  - id: log_load_failure
+    type: io.kestra.plugin.core.log.Log
+    level: ERROR
+    message: |
+      Raw SEC filing load failed in execution {{ execution.id }}.
+      Do not transform until the load and row-count assertion succeed.
+
+outputs:
+  - id: destination_table
+    type: STRING
+    value: "{{ (tasks.load_raw_sec_filings.state | default('FAILED')) == 'SUCCESS' ? outputs.load_raw_sec_filings.destinationTable : '' }}"
+  - id: loaded_rows
+    type: INT
+    value: "{{ (tasks.load_raw_sec_filings.state | default('FAILED')) == 'SUCCESS' ? outputs.load_raw_sec_filings.rows : 0 }}"
