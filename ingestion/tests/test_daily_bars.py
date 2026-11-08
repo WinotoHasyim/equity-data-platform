@@ -7,7 +7,7 @@ import pandas as pd
 import pyarrow.parquet as pq
 import pytest
 
-from equity_data_platform.daily_bars import (
+from equity_data_platform.sources.alpaca.daily_bars import (
     PARQUET_SCHEMA,
     DailyBarsBatchRequest,
     DataValidationError,
@@ -279,7 +279,7 @@ def test_publish_failure_removes_staging_directory(
         raise OSError("simulated disk failure")
 
     monkeypatch.setattr(
-        "equity_data_platform.batch.pq.write_table",
+        "equity_data_platform.core.batch.pq.write_table",
         fail_write,
     )
 

@@ -2,7 +2,7 @@ from datetime import date
 
 import pytest
 
-from equity_data_platform.pipeline import build_parser, parse_run_id
+from equity_data_platform.commands.daily_bars import build_parser, parse_run_id
 
 
 def test_cli_requires_both_dates() -> None:

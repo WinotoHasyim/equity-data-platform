@@ -11,12 +11,12 @@ from collections.abc import Sequence
 from datetime import date
 from pathlib import Path
 
-from equity_data_platform.clients import (
+from equity_data_platform.config import get_settings, normalize_symbols
+from equity_data_platform.sources.alpaca.clients import (
     create_historical_client,
     create_trading_client,
 )
-from equity_data_platform.config import get_settings, normalize_symbols
-from equity_data_platform.daily_bars import (
+from equity_data_platform.sources.alpaca.daily_bars import (
     DailyBarsBatchRequest,
     execute_daily_bars_batch,
 )
@@ -72,7 +72,7 @@ def parse_run_id(value: str) -> str:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="equity-data-platform",
+        prog="equity-ingest daily-bars",
         description="Extract and publish an atomic Alpaca historical daily-bars batch.",
     )
     parser.add_argument(

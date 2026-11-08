@@ -19,7 +19,7 @@ from alpaca.data.requests import StockBarsRequest
 from alpaca.data.timeframe import TimeFrame
 from alpaca.trading.requests import GetCalendarRequest
 
-from equity_data_platform.batch import (
+from equity_data_platform.core.batch import (
     DataValidationError,
     OutputCollisionError,
     PublishedBatch,

@@ -4,7 +4,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
-from equity_data_platform.batch import write_parquet_parts
+from equity_data_platform.core.batch import write_parquet_parts
 
 
 def test_write_parquet_parts_splits_and_describes_files(tmp_path: Path) -> None:
