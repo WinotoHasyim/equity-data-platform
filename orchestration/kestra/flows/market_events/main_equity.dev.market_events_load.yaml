@@ -1,0 +1,49 @@
+id: market_events_load
+namespace: equity.dev
+
+description: Load one historical trade or quote Parquet batch into BigQuery raw.
+
+inputs:
+  - id: event_type
+    type: SELECT
+    values: [trades, quotes]
+  - id: extract_run_id
+    type: STRING
+  - id: parquet_uri
+    type: STRING
+  - id: expected_rows
+    type: INT
+
+tasks:
+  - id: load_raw_events
+    type: io.kestra.plugin.gcp.bigquery.LoadFromGcs
+    timeout: PT30M
+    retry:
+      type: exponential
+      interval: PT5S
+      maxInterval: PT1M
+      maxAttempts: 3
+      maxDuration: PT1H35M
+      warningOnRetry: true
+    projectId: "{{ kv('GCP_PROJECT_ID') }}"
+    location: "{{ kv('GCP_LOCATION') }}"
+    from: ["{{ inputs.parquet_uri }}"]
+    destinationTable: "{{ kv('GCP_PROJECT_ID') }}.{{ kv('BQ_RAW_DATASET') }}.alpaca_{{ inputs.event_type }}"
+    format: PARQUET
+    createDisposition: CREATE_IF_NEEDED
+    writeDisposition: WRITE_APPEND
+    timePartitioningField: timestamp
+    timePartitioningType: DAY
+    clusteringFields: [symbol, feed]
+
+  - id: assert_loaded_rows
+    type: io.kestra.plugin.core.execution.Assert
+    conditions:
+      - "{{ outputs.load_raw_events.rows == inputs.expected_rows }}"
+    errorMessage: BigQuery load count does not match the event manifest.
+
+errors:
+  - id: log_load_failure
+    type: io.kestra.plugin.core.log.Log
+    level: ERROR
+    message: "Raw {{ inputs.event_type }} load failed for extract {{ inputs.extract_run_id }}."

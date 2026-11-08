@@ -1,0 +1,124 @@
+id: market_events_extract
+namespace: equity.dev
+
+description: Extract one symbol-date of Alpaca historical trades or quotes to raw GCS.
+
+inputs:
+  - id: event_type
+    type: SELECT
+    values: [trades, quotes]
+  - id: trading_date
+    type: DATE
+  - id: symbol
+    type: STRING
+
+tasks:
+  - id: extract_events
+    type: io.kestra.plugin.scripts.shell.Commands
+    timeout: PT45M
+    containerImage: "{{ kv('PIPELINE_IMAGE') }}"
+    taskRunner:
+      type: io.kestra.plugin.scripts.runner.docker.Docker
+      pullPolicy: NEVER
+      user: root
+    env:
+      APCA_API_KEY_ID: "{{ secret('APCA_API_KEY_ID') }}"
+      APCA_API_SECRET_KEY: "{{ secret('APCA_API_SECRET_KEY') }}"
+      EVENT_TYPE: "{{ inputs.event_type }}"
+      TRADING_DATE: "{{ inputs.trading_date }}"
+      SYMBOL: "{{ inputs.symbol }}"
+      BATCH_RUN_ID: "{{ execution.id }}"
+    commands:
+      - |
+        python - <<'PY'
+        import json
+        import os
+        import subprocess
+        from pathlib import Path
+
+        event_type = os.environ["EVENT_TYPE"]
+        run_id = os.environ["BATCH_RUN_ID"]
+        batch_path = Path(event_type) / f"run_id={run_id}"
+        subprocess.run(
+            [
+                "/app/.venv/bin/equity-ingest",
+                "market-events",
+                event_type,
+                "--start-date", os.environ["TRADING_DATE"],
+                "--end-date", os.environ["TRADING_DATE"],
+                "--symbol", os.environ["SYMBOL"],
+                "--run-id", run_id,
+                "--output-dir", ".",
+            ],
+            check=True,
+        )
+        manifest_path = batch_path / "manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        part_names = sorted(path.name for path in batch_path.glob("part-*.parquet"))
+        manifest_parts = sorted(item["path"] for item in manifest["files"])
+        if manifest["run_id"] != run_id or part_names != manifest_parts:
+            raise RuntimeError("Extracted files do not match the completion manifest")
+        output = {"outputs": {
+            "batch_path": str(batch_path),
+            "has_parquet": bool(part_names),
+            "manifest_key": str(manifest_path),
+            "part_names": part_names,
+            "row_count": manifest["row_count"],
+        }}
+        print(f"::{json.dumps(output, separators=(',', ':'))}::")
+        PY
+    outputFiles:
+      - "{{ inputs.event_type }}/run_id={{ execution.id }}/*"
+
+  - id: upload_parts_if_present
+    type: io.kestra.plugin.core.flow.If
+    condition: "{{ outputs.extract_events.vars.has_parquet }}"
+    then:
+      - id: upload_parts
+        type: io.kestra.plugin.core.flow.ForEach
+        values: "{{ outputs.extract_events.vars.part_names }}"
+        concurrencyLimit: 4
+        tasks:
+          - id: upload_part
+            type: io.kestra.plugin.gcp.gcs.Upload
+            timeout: PT10M
+            retry:
+              type: exponential
+              interval: PT2S
+              maxInterval: PT30S
+              maxAttempts: 4
+              maxDuration: PT45M
+              warningOnRetry: true
+            projectId: "{{ kv('GCP_PROJECT_ID') }}"
+            from: "{{ outputs.extract_events.outputFiles[outputs.extract_events.vars.batch_path ~ '/' ~ taskrun.value] }}"
+            to: "gs://{{ kv('GCS_RAW_BUCKET') }}/source=alpaca/dataset={{ inputs.event_type }}/event_date={{ inputs.trading_date }}/symbol={{ inputs.symbol }}/run_id={{ execution.id }}/{{ taskrun.value }}"
+
+  - id: upload_manifest
+    type: io.kestra.plugin.gcp.gcs.Upload
+    timeout: PT10M
+    projectId: "{{ kv('GCP_PROJECT_ID') }}"
+    from: "{{ outputs.extract_events.outputFiles[outputs.extract_events.vars.manifest_key] }}"
+    to: "gs://{{ kv('GCS_RAW_BUCKET') }}/source=alpaca/dataset={{ inputs.event_type }}/event_date={{ inputs.trading_date }}/symbol={{ inputs.symbol }}/run_id={{ execution.id }}/manifest.json"
+
+errors:
+  - id: log_extract_failure
+    type: io.kestra.plugin.core.log.Log
+    level: ERROR
+    message: "{{ inputs.event_type }} extraction failed for {{ inputs.symbol }} on {{ inputs.trading_date }}."
+
+outputs:
+  - id: extract_run_id
+    type: STRING
+    value: "{{ (tasks.extract_events.state | default('FAILED')) == 'SUCCESS' ? execution.id : '' }}"
+  - id: has_parquet
+    type: BOOLEAN
+    value: "{{ (tasks.extract_events.state | default('FAILED')) == 'SUCCESS' ? outputs.extract_events.vars.has_parquet : false }}"
+  - id: parquet_uri
+    type: STRING
+    value: "{{ (tasks.extract_events.state | default('FAILED')) == 'SUCCESS' ? 'gs://' ~ kv('GCS_RAW_BUCKET') ~ '/source=alpaca/dataset=' ~ inputs.event_type ~ '/event_date=' ~ inputs.trading_date ~ '/symbol=' ~ inputs.symbol ~ '/run_id=' ~ execution.id ~ '/part-*.parquet' : '' }}"
+  - id: row_count
+    type: INT
+    value: "{{ (tasks.extract_events.state | default('FAILED')) == 'SUCCESS' ? outputs.extract_events.vars.row_count : 0 }}"
+  - id: manifest_uri
+    type: STRING
+    value: "{{ (tasks.upload_manifest.state | default('FAILED')) == 'SUCCESS' ? outputs.upload_manifest.uri : '' }}"
