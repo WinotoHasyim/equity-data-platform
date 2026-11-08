@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 import logging
 import math
 import shutil
@@ -11,21 +9,28 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal, InvalidOperation
-from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
-from alpaca.common.exceptions import APIError
 from alpaca.data.enums import Adjustment, DataFeed
 from alpaca.data.requests import StockBarsRequest
 from alpaca.data.timeframe import TimeFrame
 from alpaca.trading.requests import GetCalendarRequest
-from requests.exceptions import ConnectionError as RequestsConnectionError
-from requests.exceptions import Timeout as RequestsTimeout
-from tenacity import Retrying, retry_if_exception, stop_after_attempt, wait_exponential
+
+from equity_data_platform.batch import (
+    DataValidationError,
+    OutputCollisionError,
+    PublishedBatch,
+    call_with_retries,
+    file_sha256,
+    hash_mapping,
+    package_version,
+    utc_timestamp,
+    write_json,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -74,18 +79,6 @@ PARQUET_SCHEMA = pa.schema(
 )
 
 
-class PipelineError(RuntimeError):
-    """Base error for an expected pipeline failure."""
-
-
-class DataValidationError(PipelineError):
-    """Raised when source data violates the daily-bars contract."""
-
-
-class OutputCollisionError(PipelineError):
-    """Raised when a run would overwrite an existing output directory."""
-
-
 @dataclass(frozen=True)
 class DailyBarsBatchRequest:
     """Normalized logical request for one atomic daily-bars batch."""
@@ -128,27 +121,6 @@ class DailyBarsBatchRequest:
         )
 
 
-@dataclass(frozen=True)
-class PublishedBatch:
-    """Files and status produced by a completed batch."""
-
-    run_id: str
-    batch_key: str
-    status: str
-    output_dir: Path
-    row_count: int
-
-
-def canonical_json(value: Any) -> str:
-    """Serialize hash inputs deterministically."""
-
-    return json.dumps(value, separators=(",", ":"), sort_keys=True)
-
-
-def hash_mapping(value: dict[str, Any]) -> str:
-    return hashlib.sha256(canonical_json(value).encode("utf-8")).hexdigest()
-
-
 def decimal_value(value: Any) -> Decimal:
     """Convert a source numeric value to the fixed financial scale."""
 
@@ -156,17 +128,6 @@ def decimal_value(value: Any) -> Decimal:
         return Decimal(str(value)).quantize(PRICE_QUANTUM)
     except (InvalidOperation, ValueError, TypeError) as exc:
         raise DataValidationError(f"Invalid decimal value: {value!r}") from exc
-
-
-def utc_timestamp(value: Any) -> datetime:
-    """Normalize a pandas or Python timestamp to an aware UTC datetime."""
-
-    timestamp = pd.Timestamp(value)
-    if timestamp.tzinfo is None:
-        timestamp = timestamp.tz_localize("UTC")
-    else:
-        timestamp = timestamp.tz_convert("UTC")
-    return timestamp.to_pydatetime()
 
 
 def build_stock_bars_request(request: DailyBarsBatchRequest) -> StockBarsRequest:
@@ -186,34 +147,6 @@ def build_stock_bars_request(request: DailyBarsBatchRequest) -> StockBarsRequest
         adjustment=Adjustment.RAW,
         feed=DataFeed(request.feed),
     )
-
-
-def _is_transient_exception(exc: BaseException) -> bool:
-    if isinstance(exc, APIError):
-        return exc.status_code == 429 or (
-            exc.status_code is not None and exc.status_code >= 500
-        )
-    return isinstance(
-        exc,
-        (ConnectionError, RequestsConnectionError, RequestsTimeout, TimeoutError),
-    )
-
-
-def call_with_retries(operation: Callable[[], Any]) -> Any:
-    """Run an Alpaca operation with bounded retries for transient failures."""
-
-    retryer = Retrying(
-        retry=retry_if_exception(_is_transient_exception),
-        wait=wait_exponential(multiplier=1, min=1, max=8),
-        stop=stop_after_attempt(4),
-        reraise=True,
-        before_sleep=lambda state: LOGGER.warning(
-            "Transient Alpaca error; retrying attempt %s: %s",
-            state.attempt_number + 1,
-            state.outcome.exception() if state.outcome else "unknown error",
-        ),
-    )
-    return retryer(operation)
 
 
 def fetch_market_sessions(
@@ -463,28 +396,6 @@ def build_parquet_records(
     return records
 
 
-def _package_version() -> str:
-    try:
-        return version("equity-data-platform")
-    except PackageNotFoundError:
-        return "unknown"
-
-
-def _file_sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as file_handle:
-        for chunk in iter(lambda: file_handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
-def _write_json(path: Path, value: dict[str, Any]) -> None:
-    path.write_text(
-        json.dumps(value, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
-
-
 def publish_batch(
     *,
     output_root: Path,
@@ -524,7 +435,7 @@ def publish_batch(
                     "byte_size": part_path.stat().st_size,
                     "path": part_path.name,
                     "row_count": round_trip.num_rows,
-                    "sha256": _file_sha256(part_path),
+                    "sha256": file_sha256(part_path),
                 }
             )
 
@@ -544,14 +455,14 @@ def publish_batch(
             "row_count": len(records),
             "run_id": run_id,
             "schema_version": SCHEMA_VERSION,
-            "software_version": _package_version(),
+            "software_version": package_version(),
             "source": SOURCE,
             "started_at": utc_timestamp(started_at).isoformat(),
             "status": status,
             "timeframe": TIMEFRAME,
             "validation_status": "passed",
         }
-        _write_json(staging_dir / "manifest.json", manifest)
+        write_json(staging_dir / "manifest.json", manifest)
 
         final_dir.parent.mkdir(parents=True, exist_ok=True)
         staging_dir.rename(final_dir)
