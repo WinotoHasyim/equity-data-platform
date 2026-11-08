@@ -69,6 +69,7 @@ class Settings(BaseSettings):
 
     alpaca_api_key: SecretStr = Field(validation_alias="APCA_API_KEY_ID")
     alpaca_secret_key: SecretStr = Field(validation_alias="APCA_API_SECRET_KEY")
+    sec_user_agent: str | None = Field(default=None, validation_alias="SEC_USER_AGENT")
 
     symbols: tuple[str, ...] = PIPELINE_CONFIG.symbols
     feed: Literal["iex"] = PIPELINE_CONFIG.feed
