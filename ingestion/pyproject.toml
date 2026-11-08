@@ -18,7 +18,7 @@ dependencies = [
 ]
 
 [project.scripts]
-equity-data-platform = "equity_data_platform.commands.daily_bars:main"
+equity-ingest = "equity_data_platform.cli:main"
 
 [build-system]
 requires = ["uv_build>=0.12.3,<0.13.0"]

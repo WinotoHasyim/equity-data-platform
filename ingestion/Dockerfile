@@ -18,4 +18,4 @@ RUN uv sync --frozen --no-dev \
 
 USER appuser
 
-ENTRYPOINT ["uv", "run", "--no-sync", "equity-data-platform"]
+ENTRYPOINT ["uv", "run", "--no-sync", "equity-ingest"]
