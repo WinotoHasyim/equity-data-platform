@@ -1,0 +1,67 @@
+id: assets_load
+namespace: equity.dev
+
+description: Load one immutable asset snapshot into the append-only BigQuery raw table.
+
+inputs:
+  - id: extract_run_id
+    type: STRING
+  - id: parquet_uri
+    type: STRING
+  - id: expected_rows
+    type: INT
+
+tasks:
+  - id: load_raw_assets
+    type: io.kestra.plugin.gcp.bigquery.LoadFromGcs
+    timeout: PT30M
+    retry:
+      type: exponential
+      interval: PT5S
+      maxInterval: PT1M
+      maxAttempts: 3
+      maxDuration: PT1H35M
+      warningOnRetry: true
+    projectId: "{{ kv('GCP_PROJECT_ID') }}"
+    location: "{{ kv('GCP_LOCATION') }}"
+    from:
+      - "{{ inputs.parquet_uri }}"
+    destinationTable: "{{ kv('GCP_PROJECT_ID') }}.{{ kv('BQ_RAW_DATASET') }}.alpaca_assets"
+    format: PARQUET
+    createDisposition: CREATE_IF_NEEDED
+    writeDisposition: WRITE_APPEND
+    timePartitioningField: ingested_at
+    timePartitioningType: DAY
+    clusteringFields:
+      - symbol
+      - exchange
+      - status
+
+  - id: assert_loaded_row_count
+    type: io.kestra.plugin.core.execution.Assert
+    conditions:
+      - "{{ outputs.load_raw_assets.rows == inputs.expected_rows }}"
+    errorMessage: BigQuery load row count does not match the extraction manifest.
+
+  - id: log_loaded_snapshot
+    type: io.kestra.plugin.core.log.Log
+    message: |
+      Loaded asset extract {{ inputs.extract_run_id }} into
+      {{ outputs.load_raw_assets.destinationTable }}.
+      Rows loaded: {{ outputs.load_raw_assets.rows }} of {{ inputs.expected_rows }} expected.
+
+errors:
+  - id: log_load_failure
+    type: io.kestra.plugin.core.log.Log
+    level: ERROR
+    message: |
+      Raw asset load failed in execution {{ execution.id }}.
+      Do not transform until the load and row-count assertion succeed.
+
+outputs:
+  - id: destination_table
+    type: STRING
+    value: "{{ (tasks.load_raw_assets.state | default('FAILED')) == 'SUCCESS' ? outputs.load_raw_assets.destinationTable : '' }}"
+  - id: loaded_rows
+    type: INT
+    value: "{{ (tasks.load_raw_assets.state | default('FAILED')) == 'SUCCESS' ? outputs.load_raw_assets.rows : 0 }}"
