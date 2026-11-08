@@ -117,7 +117,7 @@ class MarketEventsBatchRequest:
     start_date: date
     end_date: date
     symbols: tuple[str, ...]
-    feed: Literal["iex"] = "iex"
+    feed: str = "iex"
 
     def __post_init__(self) -> None:
         if self.start_date > self.end_date:
@@ -135,6 +135,10 @@ class MarketEventsBatchRequest:
             )
         if any(symbol != symbol.strip().upper() for symbol in self.symbols):
             raise ValueError("Stock symbols must be normalized uppercase values")
+        try:
+            DataFeed(self.feed)
+        except ValueError as exc:
+            raise ValueError(f"Unsupported Alpaca data feed: {self.feed!r}") from exc
 
     @property
     def batch_key(self) -> str:
@@ -175,7 +179,7 @@ def fetch_market_events(client: Any, request: MarketEventsBatchRequest) -> pd.Da
                 symbol_or_symbols=[symbol],
                 start=start,
                 end=end,
-                feed=DataFeed.IEX,
+                feed=DataFeed(request.feed),
             )
             method = (
                 client.get_stock_trades
@@ -185,7 +189,12 @@ def fetch_market_events(client: Any, request: MarketEventsBatchRequest) -> pd.Da
             response = call_with_retries(
                 lambda method=method, params=params: method(params)
             )
-            frame = response.df.reset_index()
+            try:
+                frame = response.df.reset_index()
+            except (AttributeError, TypeError, ValueError) as exc:
+                raise DataValidationError(
+                    f"Alpaca returned a malformed {request.event_type} response"
+                ) from exc
             if not frame.empty:
                 frames.append(frame)
 
@@ -220,6 +229,15 @@ def validate_market_events(
         raise DataValidationError(
             "Market events contain invalid or timezone-naive timestamps"
         )
+    utc_timestamps = timestamps.dt.tz_convert("UTC")
+    start, end = _bounds(request.start_date)
+    outside_requested_date = (
+        utc_timestamps < pd.Timestamp(start).tz_convert("UTC")
+    ) | (utc_timestamps >= pd.Timestamp(end).tz_convert("UTC"))
+    if outside_requested_date.any():
+        raise DataValidationError(
+            "Market events contain timestamps outside the requested trading date"
+        )
     numeric_columns = (
         ["price", "size"]
         if request.event_type == "trades"
@@ -242,6 +260,8 @@ def validate_market_events(
             or (trade_ids % 1 != 0).any()
         ):
             raise DataValidationError("Trades contain invalid provider trade IDs")
+        if trade_ids.duplicated().any():
+            raise DataValidationError("Trades contain duplicate provider trade IDs")
 
     for value in frame["conditions"]:
         _conditions(value)

@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pandas as pd
 import pyarrow.parquet as pq
 import pytest
+from alpaca.data.enums import DataFeed
 
 from equity_data_platform.core.batch import DataValidationError, OutputCollisionError
 from equity_data_platform.sources.alpaca.market_events import (
@@ -14,6 +15,7 @@ from equity_data_platform.sources.alpaca.market_events import (
     MarketEventsBatchRequest,
     build_market_event_records,
     execute_market_events_batch,
+    fetch_market_events,
     publish_market_events,
     validate_market_events,
 )
@@ -109,6 +111,19 @@ def test_validation_rejects_bad_events(
         validate_market_events(frame, request(event_type))
 
 
+def test_validation_rejects_events_outside_requested_trading_date() -> None:
+    invalid = trades_frame()
+    invalid.loc[0, "timestamp"] = pd.Timestamp("2026-10-28T13:10:48Z")
+    with pytest.raises(DataValidationError, match="outside the requested"):
+        validate_market_events(invalid, request())
+
+
+def test_validation_rejects_duplicate_trade_ids() -> None:
+    duplicated = pd.concat([trades_frame(), trades_frame()], ignore_index=True)
+    with pytest.raises(DataValidationError, match="duplicate provider trade IDs"):
+        validate_market_events(duplicated, request())
+
+
 def test_trade_identity_is_stable_while_payload_detects_correction() -> None:
     now = datetime(2026, 11, 8, tzinfo=UTC)
     first = build_market_event_records(trades_frame(), request(), "one", now)[0]
@@ -178,12 +193,61 @@ def test_publish_writes_expected_schema(
         )
 
 
+def test_publish_empty_market_event_batch_writes_manifest_only(
+    tmp_path: Path,
+) -> None:
+    batch_request = request("quotes")
+    now = datetime(2026, 11, 8, tzinfo=UTC)
+    result = publish_market_events(
+        output_root=tmp_path,
+        request=batch_request,
+        run_id="empty-events",
+        records=[],
+        started_at=now,
+        completed_at=now,
+    )
+    manifest = json.loads((result.output_dir / "manifest.json").read_text())
+    assert result.status == "no_data_returned"
+    assert manifest["files"] == []
+    assert list(result.output_dir.glob("*.parquet")) == []
+
+
 class FakeHistoricalClient:
     def get_stock_trades(self, _request: object) -> SimpleNamespace:
         return SimpleNamespace(df=trades_frame().set_index(["symbol", "timestamp"]))
 
     def get_stock_quotes(self, _request: object) -> SimpleNamespace:
         return SimpleNamespace(df=quotes_frame().set_index(["symbol", "timestamp"]))
+
+
+class CapturingHistoricalClient(FakeHistoricalClient):
+    captured_request: object | None = None
+
+    def get_stock_trades(self, request: object) -> SimpleNamespace:
+        self.captured_request = request
+        return super().get_stock_trades(request)
+
+
+def test_fetch_uses_the_requested_feed() -> None:
+    client = CapturingHistoricalClient()
+    batch_request = MarketEventsBatchRequest(
+        event_type="trades",
+        start_date=date(2026, 10, 27),
+        end_date=date(2026, 10, 27),
+        symbols=("AAPL",),
+        feed="sip",
+    )
+    fetch_market_events(client, batch_request)
+    assert client.captured_request is not None
+    assert client.captured_request.feed == DataFeed.SIP
+
+
+def test_fetch_rejects_malformed_provider_response() -> None:
+    client = SimpleNamespace(
+        get_stock_trades=lambda _request: SimpleNamespace(df=None)
+    )
+    with pytest.raises(DataValidationError, match="malformed trades response"):
+        fetch_market_events(client, request())
 
 
 @pytest.mark.parametrize("event_type", ["trades", "quotes"])
