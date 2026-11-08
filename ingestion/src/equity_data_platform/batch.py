@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from importlib.metadata import PackageNotFoundError, version
@@ -13,11 +13,15 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
 from alpaca.common.exceptions import APIError
 from requests.exceptions import ConnectionError as RequestsConnectionError
 from requests.exceptions import HTTPError as RequestsHTTPError
 from requests.exceptions import Timeout as RequestsTimeout
 from tenacity import Retrying, retry_if_exception, stop_after_attempt, wait_exponential
+
+DEFAULT_MAX_ROWS_PER_FILE = 500_000
 
 LOGGER = logging.getLogger(__name__)
 
@@ -85,6 +89,50 @@ def file_sha256(path: Path) -> str:
         for chunk in iter(lambda: file_handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def write_parquet_parts(
+    *,
+    records: Sequence[Mapping[str, Any]],
+    schema: pa.Schema,
+    output_dir: Path,
+    max_rows_per_file: int = DEFAULT_MAX_ROWS_PER_FILE,
+) -> list[dict[str, Any]]:
+    """Write validated Parquet parts and return their manifest metadata."""
+
+    if max_rows_per_file <= 0:
+        raise ValueError("max_rows_per_file must be greater than zero")
+    if not records:
+        return []
+
+    files: list[dict[str, Any]] = []
+    for part_number, offset in enumerate(range(0, len(records), max_rows_per_file)):
+        part_path = output_dir / f"part-{part_number:05d}.parquet"
+        table = pa.Table.from_pylist(
+            list(records[offset : offset + max_rows_per_file]),
+            schema=schema,
+        )
+        pq.write_table(table, part_path, compression="zstd")
+
+        parquet_file = pq.ParquetFile(part_path)
+        if not parquet_file.schema_arrow.equals(schema, check_metadata=False):
+            raise DataValidationError(
+                f"Parquet schema mismatch for {part_path.name}"
+            )
+        if parquet_file.metadata.num_rows != table.num_rows:
+            raise DataValidationError(
+                f"Parquet row-count mismatch for {part_path.name}"
+            )
+
+        files.append(
+            {
+                "byte_size": part_path.stat().st_size,
+                "path": part_path.name,
+                "row_count": table.num_rows,
+                "sha256": file_sha256(part_path),
+            }
+        )
+    return files
 
 
 def write_json(path: Path, value: dict[str, Any]) -> None:

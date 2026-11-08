@@ -279,7 +279,7 @@ def test_publish_failure_removes_staging_directory(
         raise OSError("simulated disk failure")
 
     monkeypatch.setattr(
-        "equity_data_platform.daily_bars.pq.write_table",
+        "equity_data_platform.batch.pq.write_table",
         fail_write,
     )
 

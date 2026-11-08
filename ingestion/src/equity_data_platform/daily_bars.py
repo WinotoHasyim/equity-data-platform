@@ -14,7 +14,6 @@ from typing import Any
 
 import pandas as pd
 import pyarrow as pa
-import pyarrow.parquet as pq
 from alpaca.data.enums import Adjustment, DataFeed
 from alpaca.data.requests import StockBarsRequest
 from alpaca.data.timeframe import TimeFrame
@@ -25,11 +24,11 @@ from equity_data_platform.batch import (
     OutputCollisionError,
     PublishedBatch,
     call_with_retries,
-    file_sha256,
     hash_mapping,
     package_version,
     utc_timestamp,
     write_json,
+    write_parquet_parts,
 )
 
 LOGGER = logging.getLogger(__name__)
@@ -420,23 +419,10 @@ def publish_batch(
 
     try:
         if records:
-            table = pa.Table.from_pylist(records, schema=PARQUET_SCHEMA)
-            part_path = staging_dir / "part-00000.parquet"
-            pq.write_table(table, part_path, compression="zstd")
-
-            round_trip = pq.read_table(part_path)
-            if not round_trip.schema.equals(PARQUET_SCHEMA, check_metadata=False):
-                raise DataValidationError("Parquet round-trip schema mismatch")
-            if round_trip.num_rows != len(records):
-                raise DataValidationError("Parquet round-trip row-count mismatch")
-
-            files.append(
-                {
-                    "byte_size": part_path.stat().st_size,
-                    "path": part_path.name,
-                    "row_count": round_trip.num_rows,
-                    "sha256": file_sha256(part_path),
-                }
+            files = write_parquet_parts(
+                records=records,
+                schema=PARQUET_SCHEMA,
+                output_dir=staging_dir,
             )
 
         manifest = {
