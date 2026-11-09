@@ -6,6 +6,6 @@ equity_data_platform:
       method: oauth
       project: "{{ env_var('DBT_GCP_PROJECT_ID') }}"
       dataset: "{{ env_var('DBT_ANALYTICS_DATASET') }}"
-      location: US
+      location: "{{ env_var('DBT_GCP_LOCATION') }}"
       threads: 1
       priority: interactive

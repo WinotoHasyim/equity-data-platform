@@ -4,15 +4,11 @@ on:
   push:
     paths:
       - "analytics/dbt/**"
-      - "ingestion/pyproject.toml"
-      - "ingestion/uv.lock"
       - ".github/dbt/**"
       - ".github/workflows/dbt-ci.yml"
   pull_request:
     paths:
       - "analytics/dbt/**"
-      - "ingestion/pyproject.toml"
-      - "ingestion/uv.lock"
       - ".github/dbt/**"
       - ".github/workflows/dbt-ci.yml"
 
@@ -24,6 +20,7 @@ jobs:
     runs-on: ubuntu-24.04
     env:
       DBT_GCP_PROJECT_ID: equity-data-platform-ci
+      DBT_GCP_LOCATION: asia-southeast2
       DBT_RAW_DATASET: equity_raw
       DBT_ANALYTICS_DATASET: equity_analytics
     steps:
@@ -31,10 +28,10 @@ jobs:
       - uses: astral-sh/setup-uv@v10.3.3
         with:
           enable-cache: true
-          cache-dependency-glob: ingestion/uv.lock
-      - run: uv sync --project ingestion --frozen
+          cache-dependency-glob: analytics/dbt/uv.lock
+      - run: uv sync --project analytics/dbt --frozen
       - name: Parse dbt project without warehouse credentials
         run: >-
-          uv run --project ingestion dbt parse
+          uv run --project analytics/dbt dbt parse
           --project-dir analytics/dbt
           --profiles-dir .github/dbt
