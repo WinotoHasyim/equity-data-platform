@@ -1,0 +1,19 @@
+select
+    symbol,
+    timestamp,
+    provider_trade_id,
+    exchange,
+    price,
+    size,
+    conditions,
+    tape,
+    source,
+    dataset,
+    feed,
+    run_id,
+    batch_key,
+    event_key,
+    payload_fingerprint,
+    ingested_at,
+    schema_version
+from {{ source('equity_raw', 'alpaca_trades') }}
