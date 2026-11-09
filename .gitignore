@@ -19,6 +19,8 @@ htmlcov/
 analytics/dbt/dbt_packages/
 analytics/dbt/logs/
 analytics/dbt/target/
+analytics/dbt/.user.yml
+analytics/dbt/profiles.yml
 .github/dbt/.user.yml
 
 # ==========================================
@@ -91,8 +93,8 @@ planout
 .DS_Store
 Thumbs.db
 
-# VS Code local project settings (optional)
-# .vscode/
+# VS Code local project settings
+.vscode/
 
 # Private learning notes. Public project documentation under docs/ remains tracked.
 docs/project_course.md
