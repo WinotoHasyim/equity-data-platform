@@ -1,0 +1,8 @@
+[project]
+name = "equity-data-platform-dbt"
+version = "0.1.0"
+description = "dbt runtime for the Equity Data Platform"
+requires-python = ">=3.13"
+dependencies = [
+    "dbt-bigquery>=1.10,<2.0",
+]

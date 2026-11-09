@@ -124,12 +124,29 @@ and recovery instructions.
 The local automated checks are:
 
 ```bash
-uv sync --frozen
-uv run ruff check src tests scripts
-uv run pytest -q
-terraform -chdir=terraform fmt -check
-terraform -chdir=terraform validate
+uv sync --project ingestion --frozen
+uv run --project ingestion ruff check \
+  ingestion/src ingestion/tests orchestration/kestra/scripts
+uv run --project ingestion pytest -q ingestion/tests
+terraform -chdir=infrastructure/terraform fmt -check
+terraform -chdir=infrastructure/terraform validate
 ```
+
+## Repository layout
+
+```text
+equity-data-platform/
+├── ingestion/              # Python extractors, validation, and tests
+├── analytics/dbt/          # Staging, canonical, and mart models
+├── orchestration/kestra/   # Kestra flows and local Compose services
+├── infrastructure/terraform/ # GCP infrastructure as code
+├── docs/                   # Design references and sample outputs
+└── .github/workflows/      # Component-scoped continuous integration
+```
+
+The components remain in one repository because one source addition commonly
+changes ingestion, orchestration, warehouse models, and tests together. CI path
+filters run only the checks relevant to the changed component.
 
 ## Documentation
 
@@ -139,6 +156,8 @@ terraform -chdir=terraform validate
   retry boundaries, failure behavior, and remaining production controls.
 - [Streaming ingestion design](STREAMING_INGESTION.md) is the accepted proposal
   for the future live-data path.
+- [Multi-source platform plan](docs/multi-source-platform-plan.md) defines the
+  planned providers, canonical models, analytical marts, and delivery order.
 - [Alpaca stock-data inventory](docs/reference/alpaca-data-inventory.md) records
   the stock-related SDK interfaces evaluated for later datasets.
 

@@ -1,0 +1,22 @@
+select
+    symbol,
+    timestamp,
+    bid_price,
+    bid_size,
+    bid_exchange,
+    ask_price,
+    ask_size,
+    ask_exchange,
+    quote_size_unit,
+    conditions,
+    tape,
+    source,
+    dataset,
+    feed,
+    run_id,
+    batch_key,
+    event_key,
+    payload_fingerprint,
+    ingested_at,
+    schema_version
+from {{ source('equity_raw', 'alpaca_quotes') }}

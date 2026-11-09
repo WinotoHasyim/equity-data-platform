@@ -65,7 +65,7 @@ existing PostgreSQL volume.
 Generate the ignored, Base64-encoded secret file consumed by Kestra:
 
 ```bash
-uv run python scripts/generate_kestra_secrets.py
+uv run --project ingestion python orchestration/kestra/scripts/generate_kestra_secrets.py
 ```
 
 Regenerate `.env.kestra` whenever either Alpaca credential changes. Base64 is
@@ -98,10 +98,11 @@ not require a downloaded service-account key.
 Create the ignored development variable file:
 
 ```bash
-cp terraform/terraform.tfvars.example terraform/terraform.tfvars
+cp infrastructure/terraform/terraform.tfvars.example \
+  infrastructure/terraform/terraform.tfvars
 ```
 
-Edit `terraform/terraform.tfvars`:
+Edit `infrastructure/terraform/terraform.tfvars`:
 
 ```hcl
 project_id  = "your-google-cloud-project-id"
@@ -113,18 +114,18 @@ The project ID must match `GCP_PROJECT_ID` from the previous step.
 ### 5. Provision development infrastructure
 
 ```bash
-terraform -chdir=terraform init
-terraform -chdir=terraform validate
-terraform -chdir=terraform plan -out=dev.tfplan
-terraform -chdir=terraform apply dev.tfplan
-terraform -chdir=terraform output
+terraform -chdir=infrastructure/terraform init
+terraform -chdir=infrastructure/terraform validate
+terraform -chdir=infrastructure/terraform plan -out=dev.tfplan
+terraform -chdir=infrastructure/terraform apply dev.tfplan
+terraform -chdir=infrastructure/terraform output
 ```
 
 Terraform creates the raw GCS bucket and the raw and analytics BigQuery
 datasets. Capture the generated bucket name for later commands:
 
 ```bash
-export RAW_BUCKET="$(terraform -chdir=terraform output -raw raw_bucket_name)"
+export RAW_BUCKET="$(terraform -chdir=infrastructure/terraform output -raw raw_bucket_name)"
 echo "$RAW_BUCKET"
 ```
 
@@ -151,47 +152,55 @@ gcloud auth application-default login
 Recover the Terraform-managed bucket name in each new shell:
 
 ```bash
-export RAW_BUCKET="$(terraform -chdir=terraform output -raw raw_bucket_name)"
+export RAW_BUCKET="$(terraform -chdir=infrastructure/terraform output -raw raw_bucket_name)"
 ```
 
 ### 2. Run project checks
 
 ```bash
-uv sync --frozen
-uv run ruff check src tests scripts
-uv run pytest -q
-terraform -chdir=terraform validate
-terraform -chdir=terraform plan
-docker compose config --quiet
+uv sync --project ingestion --frozen
+uv run --project ingestion ruff check \
+  ingestion/src ingestion/tests orchestration/kestra/scripts
+uv run --project ingestion pytest -q ingestion/tests
+terraform -chdir=infrastructure/terraform validate
+terraform -chdir=infrastructure/terraform plan
+docker compose --env-file .env \
+  -f orchestration/kestra/docker-compose.yaml config --quiet
 ```
 
 The Terraform plan should report no changes unless the infrastructure
 configuration was intentionally modified.
 
-The GitHub Actions workflow runs the Python checks, Terraform formatting and
-validation, and an offline dbt parse on every push and pull request. It
-does not receive Alpaca or Google Cloud credentials and therefore does not run
-a warehouse-connected dbt build, live extraction, or infrastructure changes.
+Component-scoped GitHub Actions workflows use path filters for Python,
+Terraform, dbt, and orchestration changes. They do not receive Alpaca or Google
+Cloud credentials and therefore do not run a warehouse-connected dbt build,
+live extraction, or infrastructure changes.
 
 ### 3. Build the pipeline image
 
 ```bash
-docker compose --profile build build pipeline-image
+docker compose --env-file .env \
+  -f orchestration/kestra/docker-compose.yaml \
+  --profile build build pipeline-image
 docker image ls equity-data-platform:dev
 ```
 
-Rebuild after changing Python source, `pyproject.toml`, `uv.lock`,
-`config.toml`, or the Dockerfile. Building the image does not start the batch
-pipeline. `docker compose images` lists images used by containers that Compose
-has already created, so it can be empty immediately after a build-only command.
-Use `docker image ls` to verify a locally built image.
+Rebuild after changing Python source, `ingestion/pyproject.toml`,
+`ingestion/uv.lock`, `ingestion/config.toml`, or `ingestion/Dockerfile`.
+Building the image does not start the batch pipeline. `docker compose images`
+lists images used by containers that Compose has already created, so it can be
+empty immediately after a build-only command. Use `docker image ls` to verify a
+locally built image.
 
 ### 4. Start Kestra
 
 ```bash
-docker compose up -d
-docker compose ps
-docker compose logs -f kestra
+docker compose --env-file .env \
+  -f orchestration/kestra/docker-compose.yaml up -d
+docker compose --env-file .env \
+  -f orchestration/kestra/docker-compose.yaml ps
+docker compose --env-file .env \
+  -f orchestration/kestra/docker-compose.yaml logs -f kestra
 ```
 
 Stop following the logs with `Ctrl+C` after Kestra reports that its server is
@@ -204,7 +213,7 @@ Synchronize the Terraform-managed resource names and the locally selected
 pipeline image into Kestra's `equity.dev` namespace:
 
 ```bash
-uv run python scripts/sync_kestra_kv.py
+uv run --project ingestion python orchestration/kestra/scripts/sync_kestra_kv.py
 ```
 
 Run this command after the first startup, after resetting Kestra's volumes, or
@@ -216,12 +225,14 @@ If the image tag changes, rebuild the image and synchronize the namespace
 configuration:
 
 ```bash
-docker compose --profile build build pipeline-image
-uv run python scripts/sync_kestra_kv.py
+docker compose --env-file .env \
+  -f orchestration/kestra/docker-compose.yaml \
+  --profile build build pipeline-image
+uv run --project ingestion python orchestration/kestra/scripts/sync_kestra_kv.py
 ```
 
-The `flows/` directory is mounted read-only and watched by Kestra. Four flows
-should appear automatically:
+The `orchestration/kestra/flows/` directory is mounted read-only and watched by
+Kestra. Four flows should appear automatically:
 
 ```text
 equity.dev.daily_bars_backfill
@@ -243,7 +254,8 @@ Through the Kestra UI:
 2. Select `equity.dev.daily_bars_backfill`.
 3. Select **Execute**.
 4. Enter an inclusive historical date range. Leave `symbols` empty to use the
-   universe in `config.toml`, or supply an array to override it for this run.
+   universe in `ingestion/config.toml`, or supply an array to override it for
+   this run.
 5. Start the execution and inspect each task.
 
 For a command-line smoke test, choose a known US trading day:
@@ -324,11 +336,11 @@ protocol, retry boundaries, and recovery policy.
 Recover the Terraform-managed identifiers and query both layers:
 
 ```bash
-export GCP_PROJECT_ID="$(terraform -chdir=terraform output -raw project_id)"
-export RAW_DATASET="$(terraform -chdir=terraform output -json bigquery_dataset_ids \
-  | uv run python -c 'import json,sys; print(json.load(sys.stdin)["raw"])')"
-export ANALYTICS_DATASET="$(terraform -chdir=terraform output -json bigquery_dataset_ids \
-  | uv run python -c 'import json,sys; print(json.load(sys.stdin)["analytics"])')"
+export GCP_PROJECT_ID="$(terraform -chdir=infrastructure/terraform output -raw project_id)"
+export RAW_DATASET="$(terraform -chdir=infrastructure/terraform output -json bigquery_dataset_ids \
+  | uv run --project ingestion python -c 'import json,sys; print(json.load(sys.stdin)["raw"])')"
+export ANALYTICS_DATASET="$(terraform -chdir=infrastructure/terraform output -json bigquery_dataset_ids \
+  | uv run --project ingestion python -c 'import json,sys; print(json.load(sys.stdin)["analytics"])')"
 
 bq query --use_legacy_sql=false \
   "SELECT COUNT(*) AS rows FROM \`${GCP_PROJECT_ID}.${RAW_DATASET}.daily_bars\`"
@@ -345,7 +357,8 @@ not-null tests before it succeeds.
 ## Stop the development environment
 
 ```bash
-docker compose down
+docker compose --env-file .env \
+  -f orchestration/kestra/docker-compose.yaml down
 ```
 
 This removes the local containers and network while preserving Kestra flows,
@@ -363,7 +376,9 @@ The following command permanently deletes the local Kestra database, flow
 revisions, execution history, and internal files stored in Compose volumes:
 
 ```bash
-docker compose down --volumes --remove-orphans
+docker compose --env-file .env \
+  -f orchestration/kestra/docker-compose.yaml \
+  down --volumes --remove-orphans
 ```
 
 Checked-in flows load again on the next startup. This command does not delete
@@ -372,19 +387,24 @@ GCS objects, BigQuery datasets, Terraform state, source files, or Docker images.
 ## Troubleshooting
 
 ```bash
-docker compose ps
-docker compose logs --tail=200 kestra
-docker compose logs --tail=200 kestra-postgres
-docker compose config --quiet
-terraform -chdir=terraform state list
+docker compose --env-file .env -f orchestration/kestra/docker-compose.yaml ps
+docker compose --env-file .env -f orchestration/kestra/docker-compose.yaml \
+  logs --tail=200 kestra
+docker compose --env-file .env -f orchestration/kestra/docker-compose.yaml \
+  logs --tail=200 kestra-postgres
+docker compose --env-file .env -f orchestration/kestra/docker-compose.yaml \
+  config --quiet
+terraform -chdir=infrastructure/terraform state list
 gcloud storage buckets describe "gs://${RAW_BUCKET}"
 ```
 
 If Kestra cannot find the pipeline image, rebuild it:
 
 ```bash
-docker compose --profile build build pipeline-image
-uv run python scripts/sync_kestra_kv.py
+docker compose --env-file .env \
+  -f orchestration/kestra/docker-compose.yaml \
+  --profile build build pipeline-image
+uv run --project ingestion python orchestration/kestra/scripts/sync_kestra_kv.py
 ```
 
 If the API rejects the configured administrator credentials, ensure
@@ -393,17 +413,19 @@ After changing credentials for an already initialized local instance, reset
 the local volumes and start again:
 
 ```bash
-docker compose down --volumes --remove-orphans
-docker compose up -d
-uv run python scripts/sync_kestra_kv.py
+docker compose --env-file .env -f orchestration/kestra/docker-compose.yaml \
+  down --volumes --remove-orphans
+docker compose --env-file .env -f orchestration/kestra/docker-compose.yaml up -d
+uv run --project ingestion python orchestration/kestra/scripts/sync_kestra_kv.py
 ```
 
 If Kestra cannot resolve the Alpaca secrets, regenerate `.env.kestra` and
 recreate Kestra:
 
 ```bash
-uv run python scripts/generate_kestra_secrets.py
-docker compose up -d --force-recreate kestra
+uv run --project ingestion python orchestration/kestra/scripts/generate_kestra_secrets.py
+docker compose --env-file .env -f orchestration/kestra/docker-compose.yaml \
+  up -d --force-recreate kestra
 ```
 
 If Kestra cannot upload to GCS, verify ADC and access to the bucket:

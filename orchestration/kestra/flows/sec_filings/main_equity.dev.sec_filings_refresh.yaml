@@ -1,0 +1,72 @@
+id: sec_filings_refresh
+namespace: equity.dev
+
+description: Coordinate SEC filing extraction, raw loading, and canonical models.
+
+concurrency:
+  limit: 1
+
+inputs:
+  - id: start_date
+    type: DATE
+  - id: end_date
+    type: DATE
+  - id: symbols
+    type: ARRAY
+    itemType: STRING
+    required: false
+
+tasks:
+  - id: extract
+    type: io.kestra.plugin.core.flow.Subflow
+    namespace: equity.dev
+    flowId: sec_filings_extract
+    wait: true
+    transmitFailed: true
+    inputs:
+      start_date: "{{ inputs.start_date }}"
+      end_date: "{{ inputs.end_date }}"
+      symbols: "{{ inputs.symbols ?? [] }}"
+  - id: load_and_transform_if_data
+    type: io.kestra.plugin.core.flow.If
+    condition: "{{ outputs.extract.outputs.has_parquet }}"
+    then:
+      - id: load
+        type: io.kestra.plugin.core.flow.Subflow
+        namespace: equity.dev
+        flowId: sec_filings_load
+        wait: true
+        transmitFailed: true
+        inputs:
+          extract_run_id: "{{ outputs.extract.outputs.extract_run_id }}"
+          parquet_uri: "{{ outputs.extract.outputs.parquet_uri }}"
+          expected_rows: "{{ outputs.extract.outputs.row_count }}"
+      - id: transform
+        type: io.kestra.plugin.core.flow.Subflow
+        namespace: equity.dev
+        flowId: sec_filings_transform
+        wait: true
+        transmitFailed: true
+        inputs:
+          extract_run_id: "{{ outputs.extract.outputs.extract_run_id }}"
+  - id: log_complete
+    type: io.kestra.plugin.core.log.Log
+    message: |
+      SEC filing refresh completed with {{ outputs.extract.outputs.row_count }} rows.
+      Manifest: {{ outputs.extract.outputs.manifest_uri }}
+
+errors:
+  - id: log_refresh_failure
+    type: io.kestra.plugin.core.log.Log
+    level: ERROR
+    message: |
+      SEC filing refresh failed. Inspect this execution and its child
+      executions before retrying.
+
+outputs:
+  - id: extract_run_id
+    type: STRING
+    value: "{{ (tasks.extract.state | default('FAILED')) == 'SUCCESS' ? outputs.extract.outputs.extract_run_id : '' }}"
+  - id: manifest_uri
+    type: STRING
+    value: "{{ (tasks.extract.state | default('FAILED')) == 'SUCCESS' ? outputs.extract.outputs.manifest_uri : '' }}"

@@ -1,0 +1,63 @@
+id: market_events_backfill
+namespace: equity.dev
+
+description: Coordinate one bounded symbol-date trade or quote backfill.
+
+inputs:
+  - id: event_type
+    type: SELECT
+    values: [trades, quotes]
+  - id: trading_date
+    type: DATE
+  - id: symbol
+    type: STRING
+
+tasks:
+  - id: extract
+    type: io.kestra.plugin.core.flow.Subflow
+    namespace: equity.dev
+    flowId: market_events_extract
+    wait: true
+    transmitFailed: true
+    inputs:
+      event_type: "{{ inputs.event_type }}"
+      trading_date: "{{ inputs.trading_date }}"
+      symbol: "{{ inputs.symbol }}"
+
+  - id: load_and_transform_if_data
+    type: io.kestra.plugin.core.flow.If
+    condition: "{{ outputs.extract.outputs.has_parquet }}"
+    then:
+      - id: load
+        type: io.kestra.plugin.core.flow.Subflow
+        namespace: equity.dev
+        flowId: market_events_load
+        wait: true
+        transmitFailed: true
+        inputs:
+          event_type: "{{ inputs.event_type }}"
+          extract_run_id: "{{ outputs.extract.outputs.extract_run_id }}"
+          parquet_uri: "{{ outputs.extract.outputs.parquet_uri }}"
+          expected_rows: "{{ outputs.extract.outputs.row_count }}"
+      - id: transform
+        type: io.kestra.plugin.core.flow.Subflow
+        namespace: equity.dev
+        flowId: market_events_transform
+        wait: true
+        transmitFailed: true
+        inputs:
+          event_type: "{{ inputs.event_type }}"
+          extract_run_id: "{{ outputs.extract.outputs.extract_run_id }}"
+
+  - id: log_complete
+    type: io.kestra.plugin.core.log.Log
+    message: |
+      Completed {{ inputs.event_type }} for {{ inputs.symbol }} on {{ inputs.trading_date }}.
+      Rows: {{ outputs.extract.outputs.row_count }}
+      Manifest: {{ outputs.extract.outputs.manifest_uri }}
+
+errors:
+  - id: log_failure
+    type: io.kestra.plugin.core.log.Log
+    level: ERROR
+    message: "Market-event backfill failed. Inspect this execution and its children before retrying."

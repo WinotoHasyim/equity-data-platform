@@ -1,0 +1,29 @@
+name: equity_data_platform
+version: 1.0.0
+config-version: 2
+
+require-dbt-version: [">=1.10.0", "<2.0.0"]
+
+profile: equity_data_platform
+
+model-paths: ["models"]
+test-paths: ["tests"]
+
+clean-targets: ["target", "dbt_packages"]
+
+models:
+  equity_data_platform:
+    staging:
+      +materialized: view
+      +labels:
+        layer: staging
+        managed_by: dbt
+
+    canonical:
+      +materialized: table
+      +labels:
+        layer: canonical
+        managed_by: dbt
+
+flags:
+  require_generic_test_arguments_property: true

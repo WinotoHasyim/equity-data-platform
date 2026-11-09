@@ -27,8 +27,8 @@ The current pipeline makes these guarantees:
 
 1. `start_date` and `end_date` are required and inclusive.
 2. Symbols supplied to Kestra override the configured universe. If symbols are
-   omitted, the CLI reads `pipeline.symbols` from `config.toml` in the pipeline
-   image.
+   omitted, the CLI reads `pipeline.symbols` from `ingestion/config.toml` in the
+   pipeline image.
 3. A Python batch is not published locally until calendar, schema, value,
    coverage, Parquet schema, and Parquet row-count checks pass.
 4. A GCS run is complete only when its `manifest.json` exists. Parquet objects
@@ -48,10 +48,10 @@ represent the complete US consolidated market.
 | Failure | Detection | Behavior and mitigation |
 | --- | --- | --- |
 | Docker is not running | `docker info` or task-runner error | No extraction begins. Start Docker and rerun. |
-| Kestra or PostgreSQL is unavailable | Compose health/status and Kestra UI | No cloud data is changed. Run `docker compose up -d`, then inspect logs. |
+| Kestra or PostgreSQL is unavailable | Compose health/status and Kestra UI | No cloud data is changed. Run `docker compose --env-file .env -f orchestration/kestra/docker-compose.yaml up -d`, then inspect logs. |
 | Pipeline image is absent | Docker runner reports image not found because `pullPolicy: NEVER` | Build with the Compose build profile. This prevents silently pulling an unintended image. |
-| `PIPELINE_IMAGE` KV is missing or stale | Flow expression or Docker runner fails | Rebuild if needed, then run `scripts/sync_kestra_kv.py`. |
-| Checked-in source changed but mutable `:dev` image was not rebuilt | Code in execution differs from the worktree | The development runbook explicitly requires rebuilding after source, dependency, `config.toml`, or Dockerfile changes. A production design must use immutable image digests or release tags. |
+| `PIPELINE_IMAGE` KV is missing or stale | Flow expression or Docker runner fails | Rebuild if needed, then run `orchestration/kestra/scripts/sync_kestra_kv.py`. |
+| Checked-in source changed but mutable `:dev` image was not rebuilt | Code in execution differs from the worktree | The development runbook explicitly requires rebuilding after source, dependency, `ingestion/config.toml`, or `ingestion/Dockerfile` changes. A production design must use immutable image digests or release tags. |
 | Alpaca Kestra secrets are missing/stale | Secret resolution or Alpaca authentication fails | Regenerate `.env.kestra`, recreate Kestra, and rerun. No batch is published. |
 | Google ADC is expired/missing | GCS/BigQuery authentication fails | Refresh ADC. Completed local extraction may exist only in Kestra internal storage until its retention removes it. |
 | Kestra local database is deleted | Flows reload from Git, but executions/KV/history disappear | Rerun KV synchronization. GCS and BigQuery are not deleted by resetting Compose volumes. |
@@ -68,7 +68,7 @@ Residual risks:
 
 | Failure | Detection | Behavior and mitigation |
 | --- | --- | --- |
-| Wrong Google project or stale Kestra KV | Terraform output and KV inspection differ from the observed bucket/dataset | Run `terraform output`, then `scripts/sync_kestra_kv.py`; never infer the destination from a Console tab. |
+| Wrong Google project or stale Kestra KV | Terraform output and KV inspection differ from the observed bucket/dataset | Inspect `terraform -chdir=infrastructure/terraform output`, then run `orchestration/kestra/scripts/sync_kestra_kv.py`; never infer the destination from a Console tab. |
 | Storage or BigQuery API disabled | Google API error | Terraform manages the required services. Restore the API, then rerun the failed boundary. |
 | Billing disabled, quota exhausted, or service outage | Google job/API error | No later phase runs. Resolve the account/quota incident and retry with backoff. |
 | GCS and BigQuery locations differ | BigQuery load error or transfer cost | Terraform provisions both with the same `location`. Do not create ad-hoc cross-region datasets. |
@@ -83,7 +83,7 @@ Residual risks:
 | Missing dates | Kestra input validation | Execution cannot start. |
 | Malformed dates | Kestra `DATE` input validation | Execution cannot start. |
 | Start date is after end date | Python CLI validation | The container exits before creating clients or making an Alpaca request. |
-| Symbols omitted | Deliberate behavior | The shell supplies no `--symbol` flags; the CLI uses `config.toml`. |
+| Symbols omitted | Deliberate behavior | The shell supplies no `--symbol` flags; the CLI uses `ingestion/config.toml`. |
 | Empty or malformed override | Kestra array typing, JSON-array check, Python normalization | Fails before publication. |
 | Duplicate symbols | Python request contract | Fails rather than producing ambiguous expected coverage. |
 | Invalid ticker | Usually manifests as missing Alpaca coverage | Strict coverage validation fails the batch. |
@@ -303,7 +303,7 @@ Operational checks should therefore use recursive listings and the configured
 bucket name rather than assume that one Console view contains every run:
 
 ```bash
-export RAW_BUCKET="$(terraform -chdir=terraform output -raw raw_bucket_name)"
+export RAW_BUCKET="$(terraform -chdir=infrastructure/terraform output -raw raw_bucket_name)"
 
 gcloud storage ls --recursive "gs://${RAW_BUCKET}/daily_bars/**"
 gcloud storage ls --all-versions --recursive "gs://${RAW_BUCKET}/daily_bars/**"

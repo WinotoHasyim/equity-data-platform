@@ -1,0 +1,149 @@
+id: assets_extract
+namespace: equity.dev
+
+description: |
+  Extract a validated Alpaca security-master snapshot and publish immutable
+  Parquet plus its completion manifest to the configured raw GCS bucket.
+
+inputs:
+  - id: symbols
+    type: ARRAY
+    itemType: STRING
+    required: false
+    description: |
+      Optional stock-symbol override. An empty value uses the symbols packaged
+      in ingestion/config.toml.
+
+tasks:
+  - id: extract_assets
+    type: io.kestra.plugin.scripts.shell.Commands
+    timeout: PT15M
+    containerImage: "{{ kv('PIPELINE_IMAGE') }}"
+    taskRunner:
+      type: io.kestra.plugin.scripts.runner.docker.Docker
+      pullPolicy: NEVER
+      user: root
+    env:
+      APCA_API_KEY_ID: "{{ secret('APCA_API_KEY_ID') }}"
+      APCA_API_SECRET_KEY: "{{ secret('APCA_API_SECRET_KEY') }}"
+      BATCH_RUN_ID: "{{ execution.id }}"
+      BATCH_SYMBOLS: "{{ inputs.symbols ?? [] }}"
+    commands:
+      - |
+        python - <<'PY'
+        import json
+        import os
+        import subprocess
+        from pathlib import Path
+
+        run_id = os.environ["BATCH_RUN_ID"]
+        batch_path = Path("assets") / f"run_id={run_id}"
+        command = [
+            "/app/.venv/bin/equity-ingest",
+            "assets",
+            "--run-id",
+            run_id,
+            "--output-dir",
+            ".",
+        ]
+        raw_symbols = os.environ.get("BATCH_SYMBOLS", "").strip()
+        symbols = [] if raw_symbols in {"", "null"} else json.loads(raw_symbols)
+        if not isinstance(symbols, list):
+            raise TypeError("BATCH_SYMBOLS must decode to a JSON array")
+        for symbol in symbols:
+            command.extend(["--symbol", symbol])
+
+        subprocess.run(command, check=True)
+
+        manifest_path = batch_path / "manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if manifest["run_id"] != run_id:
+            raise RuntimeError("Manifest run_id does not match the Kestra execution")
+
+        part_names = sorted(path.name for path in batch_path.glob("part-*.parquet"))
+        manifest_parts = sorted(file["path"] for file in manifest["files"])
+        if not part_names or part_names != manifest_parts:
+            raise RuntimeError("Manifest file list does not match extracted Parquet files")
+
+        output = {
+            "outputs": {
+                "batch_path": str(batch_path),
+                "effective_symbols": manifest["requested_symbols"],
+                "manifest_key": str(manifest_path),
+                "part_names": part_names,
+                "row_count": manifest["row_count"],
+            }
+        }
+        print(f"::{json.dumps(output, separators=(',', ':'))}::")
+        PY
+    outputFiles:
+      - "assets/run_id={{ execution.id }}/*"
+
+  - id: upload_parquet_parts
+    type: io.kestra.plugin.core.flow.ForEach
+    values: "{{ outputs.extract_assets.vars.part_names }}"
+    concurrencyLimit: 4
+    tasks:
+      - id: upload_part
+        type: io.kestra.plugin.gcp.gcs.Upload
+        timeout: PT10M
+        retry:
+          type: exponential
+          interval: PT2S
+          maxInterval: PT30S
+          maxAttempts: 4
+          maxDuration: PT45M
+          warningOnRetry: true
+        projectId: "{{ kv('GCP_PROJECT_ID') }}"
+        from: "{{ outputs.extract_assets.outputFiles[outputs.extract_assets.vars.batch_path ~ '/' ~ taskrun.value] }}"
+        to: "gs://{{ kv('GCS_RAW_BUCKET') }}/source=alpaca/dataset=assets/run_id={{ execution.id }}/{{ taskrun.value }}"
+
+  - id: upload_manifest
+    type: io.kestra.plugin.gcp.gcs.Upload
+    timeout: PT10M
+    retry:
+      type: exponential
+      interval: PT2S
+      maxInterval: PT30S
+      maxAttempts: 4
+      maxDuration: PT45M
+      warningOnRetry: true
+    projectId: "{{ kv('GCP_PROJECT_ID') }}"
+    from: "{{ outputs.extract_assets.outputFiles[outputs.extract_assets.vars.manifest_key] }}"
+    to: "gs://{{ kv('GCS_RAW_BUCKET') }}/source=alpaca/dataset=assets/run_id={{ execution.id }}/manifest.json"
+
+  - id: log_published_snapshot
+    type: io.kestra.plugin.core.log.Log
+    message: |
+      Published Alpaca asset snapshot with {{ outputs.extract_assets.vars.row_count }} rows.
+      Symbols: {{ outputs.extract_assets.vars.effective_symbols }}
+      Manifest: {{ outputs.upload_manifest.uri }}
+
+errors:
+  - id: log_extract_failure
+    type: io.kestra.plugin.core.log.Log
+    level: ERROR
+    message: |
+      Asset extraction or GCS publication failed in execution {{ execution.id }}.
+      A missing manifest means the GCS prefix must not be consumed.
+
+outputs:
+  - id: extract_run_id
+    type: STRING
+    value: "{{ (tasks.extract_assets.state | default('FAILED')) == 'SUCCESS' ? execution.id : '' }}"
+
+  - id: manifest_uri
+    type: STRING
+    value: "{{ (tasks.upload_manifest.state | default('FAILED')) == 'SUCCESS' ? outputs.upload_manifest.uri : '' }}"
+
+  - id: parquet_uri
+    type: STRING
+    value: "{{ (tasks.extract_assets.state | default('FAILED')) == 'SUCCESS' ? 'gs://' ~ kv('GCS_RAW_BUCKET') ~ '/source=alpaca/dataset=assets/run_id=' ~ execution.id ~ '/part-*.parquet' : '' }}"
+
+  - id: row_count
+    type: INT
+    value: "{{ (tasks.extract_assets.state | default('FAILED')) == 'SUCCESS' ? outputs.extract_assets.vars.row_count : 0 }}"
+
+  - id: effective_symbols
+    type: ARRAY
+    value: "{{ (tasks.extract_assets.state | default('FAILED')) == 'SUCCESS' ? outputs.extract_assets.vars.effective_symbols : [] }}"

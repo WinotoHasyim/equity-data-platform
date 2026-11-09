@@ -1,0 +1,68 @@
+id: assets_refresh
+namespace: equity.dev
+
+description: Coordinate an Alpaca asset snapshot, raw load, and security-dimension refresh.
+
+concurrency:
+  limit: 1
+
+inputs:
+  - id: symbols
+    type: ARRAY
+    itemType: STRING
+    required: false
+    description: Optional override for the stock symbols in ingestion/config.toml.
+
+tasks:
+  - id: extract
+    type: io.kestra.plugin.core.flow.Subflow
+    namespace: equity.dev
+    flowId: assets_extract
+    wait: true
+    transmitFailed: true
+    inputs:
+      symbols: "{{ inputs.symbols ?? [] }}"
+
+  - id: load
+    type: io.kestra.plugin.core.flow.Subflow
+    namespace: equity.dev
+    flowId: assets_load
+    wait: true
+    transmitFailed: true
+    inputs:
+      extract_run_id: "{{ outputs.extract.outputs.extract_run_id }}"
+      expected_rows: "{{ outputs.extract.outputs.row_count }}"
+      parquet_uri: "{{ outputs.extract.outputs.parquet_uri }}"
+
+  - id: transform
+    type: io.kestra.plugin.core.flow.Subflow
+    namespace: equity.dev
+    flowId: assets_transform
+    wait: true
+    transmitFailed: true
+    inputs:
+      extract_run_id: "{{ outputs.extract.outputs.extract_run_id }}"
+
+  - id: log_refresh_complete
+    type: io.kestra.plugin.core.log.Log
+    message: |
+      Security-master refresh completed.
+      Extracted rows: {{ outputs.extract.outputs.row_count }}
+      Symbols: {{ outputs.extract.outputs.effective_symbols }}
+      Manifest: {{ outputs.extract.outputs.manifest_uri }}
+
+errors:
+  - id: log_refresh_failure
+    type: io.kestra.plugin.core.log.Log
+    level: ERROR
+    message: |
+      Security-master refresh failed. Inspect this execution and its child
+      executions before retrying.
+
+outputs:
+  - id: extract_run_id
+    type: STRING
+    value: "{{ (tasks.extract.state | default('FAILED')) == 'SUCCESS' ? outputs.extract.outputs.extract_run_id : '' }}"
+  - id: manifest_uri
+    type: STRING
+    value: "{{ (tasks.extract.state | default('FAILED')) == 'SUCCESS' ? outputs.extract.outputs.manifest_uri : '' }}"
